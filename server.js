@@ -2,8 +2,8 @@ import express from "express";
 import mongoose from "mongoose";
 import cors from "cors";
 import bcrypt from "bcrypt";
-import jwt from "jsonwebtoken";
 import admin from "firebase-admin";
+import jwt from "jsonwebtoken";
 
 const app = express();
 
@@ -11,12 +11,12 @@ app.use(express.json());
 app.use(cors());
 
 // ==============================
-// 🔐 CONFIG JWT
+// 🔐 JWT SECRET
 // ==============================
-const JWT_SECRET = process.env.JWT_SECRET || "segredo_super_forte";
+const JWT_SECRET = "SUA_CHAVE_SUPER_SECRETA";
 
 // ==============================
-// 🔥 FIREBASE ADMIN
+// 🔥 FIREBASE
 // ==============================
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 
@@ -45,7 +45,7 @@ const User = mongoose.model("User", userSchema);
 // 📲 LEADS
 // ==============================
 const leadSchema = new mongoose.Schema({
-  token: String,
+  token: { type: String, required: true },
   segment: { type: String, default: "geral" },
   createdAt: { type: Date, default: Date.now }
 });
@@ -55,20 +55,18 @@ const Lead = mongoose.model("Lead", leadSchema);
 // ==============================
 // 🔐 MIDDLEWARE AUTH
 // ==============================
-function auth(req, res, next) {
-  const header = req.headers.authorization;
+function authMiddleware(req, res, next) {
+  const token = req.headers.authorization;
 
-  if (!header) {
+  if (!token) {
     return res.status(401).json({ error: "Token não enviado" });
   }
 
-  const token = header.split(" ")[1];
-
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token.replace("Bearer ", ""), JWT_SECRET);
     req.user = decoded;
     next();
-  } catch {
+  } catch (err) {
     return res.status(401).json({ error: "Token inválido" });
   }
 }
@@ -81,20 +79,11 @@ app.get("/", (req, res) => {
 });
 
 // ==============================
-// 👤 REGISTER
+// 📥 REGISTER
 // ==============================
 app.post("/register", async (req, res) => {
   try {
     const { email, password } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({ error: "Email e senha obrigatórios" });
-    }
-
-    const existing = await User.findOne({ email });
-    if (existing) {
-      return res.status(400).json({ error: "Usuário já existe" });
-    }
 
     const hash = await bcrypt.hash(password, 10);
 
@@ -106,7 +95,6 @@ app.post("/register", async (req, res) => {
     res.json(user);
 
   } catch (error) {
-    console.error(error);
     res.status(500).json({ error: "Erro ao registrar" });
   }
 });
@@ -139,7 +127,6 @@ app.post("/login", async (req, res) => {
     res.json({ token });
 
   } catch (error) {
-    console.error(error);
     res.status(500).json({ error: "Erro no login" });
   }
 });
@@ -151,39 +138,30 @@ app.post("/save-token", async (req, res) => {
   try {
     const { token, segment } = req.body;
 
-    if (!token) {
-      return res.status(400).json({ error: "Token obrigatório" });
-    }
-
     const exists = await Lead.findOne({ token });
 
     if (exists) {
-      return res.json({ message: "Token já existe" });
+      return res.json({ message: "Token já salvo" });
     }
 
-    await Lead.create({
+    const lead = await Lead.create({
       token,
       segment: segment || "geral"
     });
 
-    res.json({ message: "Token salvo" });
+    res.json({ message: "Token salvo", lead });
 
   } catch (error) {
-    console.error(error);
     res.status(500).json({ error: "Erro ao salvar token" });
   }
 });
 
 // ==============================
-// 📤 SEND PUSH (PROTEGIDO 🔐)
+// 📤 SEND PUSH (PROTEGIDO 🔥)
 // ==============================
-app.post("/send-push", auth, async (req, res) => {
+app.post("/send-push", authMiddleware, async (req, res) => {
   try {
     const { title, body, segment } = req.body;
-
-    if (!title || !body) {
-      return res.status(400).json({ error: "Título e mensagem obrigatórios" });
-    }
 
     const filter = segment && segment !== "all"
       ? { segment }
@@ -191,17 +169,10 @@ app.post("/send-push", auth, async (req, res) => {
 
     const leads = await Lead.find(filter);
 
-    if (leads.length === 0) {
-      return res.json({ message: "Nenhum usuário encontrado" });
-    }
-
     const tokens = leads.map(l => l.token);
 
     const message = {
-      notification: {
-        title,
-        body
-      },
+      notification: { title, body },
       tokens
     };
 
@@ -215,7 +186,6 @@ app.post("/send-push", auth, async (req, res) => {
     });
 
   } catch (error) {
-    console.error("❌ ERRO PUSH:", error);
     res.status(500).json({ error: "Erro ao enviar push" });
   }
 });
