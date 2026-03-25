@@ -12,7 +12,7 @@ app.use(cors());
 // ===============================
 // 🔌 CONEXÃO MONGODB
 // ===============================
-mongoose.connect("COLE_SUA_STRING_MONGO_AQUI")
+mongoose.connect("mongodb+srv://hresteves_db_user:<db_password>@cluster0.6feyped.mongodb.net/?appName=Cluster0")
 .then(() => console.log("✅ MongoDB conectado com sucesso"))
 .catch(err => console.log("❌ Erro Mongo:", err));
 
