@@ -9,37 +9,49 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-// ===============================
+// ==============================
 // 🔌 CONEXÃO MONGODB
-// ===============================
-mongoose.connect("mongodb+srv://hresteves_db_user:<db_password>@cluster0.6feyped.mongodb.net/?appName=Cluster0")
-.then(() => console.log("✅ MongoDB conectado com sucesso"))
-.catch(err => console.log("❌ Erro Mongo:", err));
+// ==============================
+mongoose.connect(process.env.MONGO_URI)
+  .then(() => console.log("✅ MongoDB conectado com sucesso"))
+  .catch(err => console.log("❌ Erro ao conectar MongoDB:", err));
 
-// ===============================
-// 👤 MODEL USER
-// ===============================
+// ==============================
+// 📦 MODEL USER
+// ==============================
 const userSchema = new mongoose.Schema({
-  email: String,
+  email: { type: String, unique: true },
   password: String
 });
 
 const User = mongoose.model("User", userSchema);
 
-// ===============================
+// ==============================
 // 🚀 ROTA TESTE
-// ===============================
+// ==============================
 app.get("/", (req, res) => {
   res.send("🚀 API PUSH ONLINE");
 });
 
-// ===============================
-// 📝 REGISTER
-// ===============================
+// ==============================
+// 📥 REGISTER
+// ==============================
 app.post("/register", async (req, res) => {
   try {
     const { email, password } = req.body;
 
+    // validação básica
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email e senha obrigatórios" });
+    }
+
+    // verifica se já existe
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ error: "Usuário já existe" });
+    }
+
+    // hash senha
     const hash = await bcrypt.hash(password, 10);
 
     const user = await User.create({
@@ -48,15 +60,16 @@ app.post("/register", async (req, res) => {
     });
 
     res.json(user);
+
   } catch (error) {
-    console.log(error);
+    console.error("ERRO REGISTER:", error);
     res.status(500).json({ error: "Erro ao registrar" });
   }
 });
 
-// ===============================
+// ==============================
 // 🚀 START SERVER
-// ===============================
+// ==============================
 const PORT = process.env.PORT || 10000;
 
 app.listen(PORT, () => {
