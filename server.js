@@ -84,63 +84,94 @@ app.get("/", (req, res) => {
 // 👤 REGISTER
 // ==============================
 app.post("/register", async (req, res) => {
-  const { email, password } = req.body;
+  try {
+    const { email, password } = req.body;
 
-  const hash = await bcrypt.hash(password, 10);
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email e senha obrigatórios" });
+    }
 
-  const user = await User.create({
-    email,
-    password: hash
-  });
+    const existing = await User.findOne({ email });
+    if (existing) {
+      return res.status(400).json({ error: "Usuário já existe" });
+    }
 
-  res.json(user);
+    const hash = await bcrypt.hash(password, 10);
+
+    const user = await User.create({
+      email,
+      password: hash
+    });
+
+    res.json(user);
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Erro ao registrar" });
+  }
 });
 
 // ==============================
 // 🔐 LOGIN
 // ==============================
 app.post("/login", async (req, res) => {
-  const { email, password } = req.body;
+  try {
+    const { email, password } = req.body;
 
-  const user = await User.findOne({ email });
+    const user = await User.findOne({ email });
 
-  if (!user) {
-    return res.status(400).json({ error: "Usuário não encontrado" });
+    if (!user) {
+      return res.status(400).json({ error: "Usuário não encontrado" });
+    }
+
+    const valid = await bcrypt.compare(password, user.password);
+
+    if (!valid) {
+      return res.status(400).json({ error: "Senha inválida" });
+    }
+
+    const token = jwt.sign(
+      { id: user._id, email: user.email },
+      JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    res.json({ token });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Erro no login" });
   }
-
-  const valid = await bcrypt.compare(password, user.password);
-
-  if (!valid) {
-    return res.status(400).json({ error: "Senha inválida" });
-  }
-
-  const token = jwt.sign(
-    { id: user._id, email: user.email },
-    JWT_SECRET,
-    { expiresIn: "7d" }
-  );
-
-  res.json({ token });
 });
 
 // ==============================
 // 📲 SAVE TOKEN
 // ==============================
 app.post("/save-token", async (req, res) => {
-  const { token, segment } = req.body;
+  try {
+    const { token, segment } = req.body;
 
-  const exists = await Lead.findOne({ token });
+    if (!token) {
+      return res.status(400).json({ error: "Token obrigatório" });
+    }
 
-  if (exists) {
-    return res.json({ message: "Token já existe" });
+    const exists = await Lead.findOne({ token });
+
+    if (exists) {
+      return res.json({ message: "Token já existe" });
+    }
+
+    await Lead.create({
+      token,
+      segment: segment || "geral"
+    });
+
+    res.json({ message: "Token salvo" });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Erro ao salvar token" });
   }
-
-  await Lead.create({
-    token,
-    segment: segment || "geral"
-  });
-
-  res.json({ message: "Token salvo" });
 });
 
 // ==============================
@@ -150,16 +181,27 @@ app.post("/send-push", auth, async (req, res) => {
   try {
     const { title, body, segment } = req.body;
 
+    if (!title || !body) {
+      return res.status(400).json({ error: "Título e mensagem obrigatórios" });
+    }
+
     const filter = segment && segment !== "all"
       ? { segment }
       : {};
 
     const leads = await Lead.find(filter);
 
+    if (leads.length === 0) {
+      return res.json({ message: "Nenhum usuário encontrado" });
+    }
+
     const tokens = leads.map(l => l.token);
 
     const message = {
-      notification: { title, body },
+      notification: {
+        title,
+        body
+      },
       tokens
     };
 
@@ -173,7 +215,7 @@ app.post("/send-push", auth, async (req, res) => {
     });
 
   } catch (error) {
-    console.error(error);
+    console.error("❌ ERRO PUSH:", error);
     res.status(500).json({ error: "Erro ao enviar push" });
   }
 });
