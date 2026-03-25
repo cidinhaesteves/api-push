@@ -2,11 +2,21 @@ import express from "express";
 import mongoose from "mongoose";
 import cors from "cors";
 import bcrypt from "bcrypt";
+import admin from "firebase-admin";
 
 const app = express();
 
 app.use(express.json());
 app.use(cors());
+
+// ==============================
+// 🔥 FIREBASE ADMIN
+// ==============================
+const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
 
 // ==============================
 // 🔌 MONGODB
@@ -26,11 +36,11 @@ const userSchema = new mongoose.Schema({
 const User = mongoose.model("User", userSchema);
 
 // ==============================
-// 📲 LEADS (PUSH)
+// 📲 LEADS
 // ==============================
 const leadSchema = new mongoose.Schema({
-  email: String,
   token: { type: String, required: true },
+  segment: { type: String, default: "geral" },
   createdAt: { type: Date, default: Date.now }
 });
 
@@ -44,51 +54,16 @@ app.get("/", (req, res) => {
 });
 
 // ==============================
-// 📥 REGISTER
-// ==============================
-app.post("/register", async (req, res) => {
-  try {
-    const { email, password } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({ error: "Email e senha obrigatórios" });
-    }
-
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({ error: "Usuário já existe" });
-    }
-
-    const hash = await bcrypt.hash(password, 10);
-
-    const user = await User.create({
-      email,
-      password: hash
-    });
-
-    res.json({
-      id: user._id,
-      email: user.email
-    });
-
-  } catch (error) {
-    console.error("ERRO REGISTER:", error);
-    res.status(500).json({ error: "Erro ao registrar" });
-  }
-});
-
-// ==============================
-// 📲 SAVE TOKEN (🔥 NOVO)
+// 📲 SAVE TOKEN
 // ==============================
 app.post("/save-token", async (req, res) => {
   try {
-    const { token, email } = req.body;
+    const { token, segment } = req.body;
 
     if (!token) {
-      return res.status(400).json({ error: "Token é obrigatório" });
+      return res.status(400).json({ error: "Token obrigatório" });
     }
 
-    // evita duplicado
     const existing = await Lead.findOne({ token });
 
     if (existing) {
@@ -97,22 +72,64 @@ app.post("/save-token", async (req, res) => {
 
     const lead = await Lead.create({
       token,
-      email
+      segment: segment || "geral"
     });
 
-    res.json({
-      message: "Token salvo com sucesso",
-      lead
-    });
+    res.json({ message: "Token salvo", lead });
 
   } catch (error) {
-    console.error("❌ ERRO SAVE TOKEN:", error);
+    console.error(error);
     res.status(500).json({ error: "Erro ao salvar token" });
   }
 });
 
 // ==============================
-// 🚀 START
+// 📤 SEND PUSH (🔥 CORE)
+// ==============================
+app.post("/send-push", async (req, res) => {
+  try {
+    const { title, body, segment } = req.body;
+
+    if (!title || !body) {
+      return res.status(400).json({ error: "Título e mensagem obrigatórios" });
+    }
+
+    // 🔍 FILTRO
+    const filter = segment && segment !== "all"
+      ? { segment }
+      : {};
+
+    const leads = await Lead.find(filter);
+
+    if (leads.length === 0) {
+      return res.json({ message: "Nenhum usuário encontrado" });
+    }
+
+    const tokens = leads.map(l => l.token);
+
+    const message = {
+      notification: {
+        title,
+        body
+      },
+      tokens
+    };
+
+    const response = await admin.messaging().sendEachForMulticast(message);
+
+    res.json({
+      success: true,
+      total: tokens.length,
+      sent: response.successCount,
+      failed: response.failureCount
+    });
+
+  } catch (error) {
+    console.error("❌ ERRO PUSH:", error);
+    res.status(500).json({ error: "Erro ao enviar push" });
+  }
+});
+
 // ==============================
 const PORT = process.env.PORT || 10000;
 
