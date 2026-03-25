@@ -1,79 +1,94 @@
+```javascript
 import express from "express";
-import cors from "cors";
 import mongoose from "mongoose";
+import cors from "cors";
+import bcrypt from "bcrypt";
 
-// ===============================
-// CONFIG
-// ===============================
+// ==============================
+// CONFIG APP
+// ==============================
 const app = express();
-app.use(cors());
+
+// 🔥 ESSENCIAL
 app.use(express.json());
+app.use(cors());
 
-// ===============================
-// MONGODB CONNECTION (CORRIGIDO)
-// ===============================
-const MONGO_URI = process.env.MONGO_URI;
-
-if (!MONGO_URI) {
-  console.log("❌ ERRO: MONGO_URI não encontrada no ambiente");
-  process.exit(1);
-}
-
-mongoose.connect(MONGO_URI)
+// ==============================
+// CONEXÃO MONGODB
+// ==============================
+mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB conectado com sucesso"))
-  .catch((err) => {
-    console.log("❌ Erro ao conectar no MongoDB:", err);
-    process.exit(1);
-  });
+  .catch((err) => console.error("❌ Erro MongoDB:", err));
 
-// ===============================
-// MODEL
-// ===============================
-const tokenSchema = new mongoose.Schema({
-  token: { type: String, required: true, unique: true }
+// ==============================
+// SCHEMA USER
+// ==============================
+const userSchema = new mongoose.Schema({
+  email: String,
+  password: String
 });
 
-const Token = mongoose.model("Token", tokenSchema);
+const User = mongoose.model("User", userSchema);
 
-// ===============================
-// ROUTES
-// ===============================
-
-// teste
+// ==============================
+// ROTA TESTE
+// ==============================
 app.get("/", (req, res) => {
-  res.send("🚀 API PUSH ONLINE");
+  res.send("API OK 🚀");
 });
 
-// salvar token
-app.post("/save-token", async (req, res) => {
+// ==============================
+// REGISTER
+// ==============================
+app.post("/register", async (req, res) => {
   try {
-    const { token } = req.body;
+    const { email, password } = req.body;
 
-    if (!token) {
-      return res.status(400).json({ error: "Token não enviado" });
-    }
+    const hash = await bcrypt.hash(password, 10);
 
-    await Token.updateOne(
-      { token },
-      { token },
-      { upsert: true }
-    );
+    const user = await User.create({
+      email,
+      password: hash
+    });
 
-    console.log("✅ Token salvo no MongoDB");
-
-    res.status(200).json({ message: "Token salvo com sucesso" });
-
-  } catch (error) {
-    console.log("❌ Erro ao salvar token:", error);
-    res.status(500).json({ error: "Erro ao salvar token" });
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
-// ===============================
-// SERVER
-// ===============================
+// ==============================
+// LOGIN
+// ==============================
+app.post("/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(404).json({ error: "Usuário não encontrado" });
+    }
+
+    const valid = await bcrypt.compare(password, user.password);
+
+    if (!valid) {
+      return res.status(401).json({ error: "Senha inválida" });
+    }
+
+    res.json({ message: "Login OK ✅" });
+
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==============================
+// START SERVER
+// ==============================
 const PORT = process.env.PORT || 10000;
 
 app.listen(PORT, () => {
   console.log(`🚀 API rodando na porta ${PORT}`);
 });
+```
