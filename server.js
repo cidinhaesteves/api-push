@@ -5,29 +5,39 @@ import bcrypt from "bcrypt";
 
 const app = express();
 
-// 🔥 ESSENCIAL
 app.use(express.json());
 app.use(cors());
 
 // ==============================
-// 🔌 CONEXÃO MONGODB
+// 🔌 MONGODB
 // ==============================
 mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ MongoDB conectado com sucesso"))
-  .catch(err => console.log("❌ Erro ao conectar MongoDB:", err));
+  .then(() => console.log("✅ MongoDB conectado"))
+  .catch(err => console.error("❌ Mongo erro:", err));
 
 // ==============================
-// 📦 MODEL USER
+// 👤 USER
 // ==============================
 const userSchema = new mongoose.Schema({
   email: { type: String, unique: true },
-  password: String
+  password: String,
 });
 
 const User = mongoose.model("User", userSchema);
 
 // ==============================
-// 🚀 ROTA TESTE
+// 📲 LEADS (PUSH)
+// ==============================
+const leadSchema = new mongoose.Schema({
+  email: String,
+  token: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now }
+});
+
+const Lead = mongoose.model("Lead", leadSchema);
+
+// ==============================
+// 🚀 TESTE
 // ==============================
 app.get("/", (req, res) => {
   res.send("🚀 API PUSH ONLINE");
@@ -40,18 +50,15 @@ app.post("/register", async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // validação básica
     if (!email || !password) {
       return res.status(400).json({ error: "Email e senha obrigatórios" });
     }
 
-    // verifica se já existe
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ error: "Usuário já existe" });
     }
 
-    // hash senha
     const hash = await bcrypt.hash(password, 10);
 
     const user = await User.create({
@@ -59,7 +66,10 @@ app.post("/register", async (req, res) => {
       password: hash
     });
 
-    res.json(user);
+    res.json({
+      id: user._id,
+      email: user.email
+    });
 
   } catch (error) {
     console.error("ERRO REGISTER:", error);
@@ -68,10 +78,44 @@ app.post("/register", async (req, res) => {
 });
 
 // ==============================
-// 🚀 START SERVER
+// 📲 SAVE TOKEN (🔥 NOVO)
+// ==============================
+app.post("/save-token", async (req, res) => {
+  try {
+    const { token, email } = req.body;
+
+    if (!token) {
+      return res.status(400).json({ error: "Token é obrigatório" });
+    }
+
+    // evita duplicado
+    const existing = await Lead.findOne({ token });
+
+    if (existing) {
+      return res.json({ message: "Token já salvo" });
+    }
+
+    const lead = await Lead.create({
+      token,
+      email
+    });
+
+    res.json({
+      message: "Token salvo com sucesso",
+      lead
+    });
+
+  } catch (error) {
+    console.error("❌ ERRO SAVE TOKEN:", error);
+    res.status(500).json({ error: "Erro ao salvar token" });
+  }
+});
+
+// ==============================
+// 🚀 START
 // ==============================
 const PORT = process.env.PORT || 10000;
 
 app.listen(PORT, () => {
-  console.log(`🚀 API rodando na porta ${PORT}`);
+  console.log(`🚀 Rodando na porta ${PORT}`);
 });
