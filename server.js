@@ -1,28 +1,24 @@
-```javascript
 import express from "express";
 import mongoose from "mongoose";
 import cors from "cors";
 import bcrypt from "bcrypt";
 
-// ==============================
-// CONFIG APP
-// ==============================
 const app = express();
 
 // 🔥 ESSENCIAL
 app.use(express.json());
 app.use(cors());
 
-// ==============================
-// CONEXÃO MONGODB
-// ==============================
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ MongoDB conectado com sucesso"))
-  .catch((err) => console.error("❌ Erro MongoDB:", err));
+// ===============================
+// 🔌 CONEXÃO MONGODB
+// ===============================
+mongoose.connect("COLE_SUA_STRING_MONGO_AQUI")
+.then(() => console.log("✅ MongoDB conectado com sucesso"))
+.catch(err => console.log("❌ Erro Mongo:", err));
 
-// ==============================
-// SCHEMA USER
-// ==============================
+// ===============================
+// 👤 MODEL USER
+// ===============================
 const userSchema = new mongoose.Schema({
   email: String,
   password: String
@@ -30,16 +26,16 @@ const userSchema = new mongoose.Schema({
 
 const User = mongoose.model("User", userSchema);
 
-// ==============================
-// ROTA TESTE
-// ==============================
+// ===============================
+// 🚀 ROTA TESTE
+// ===============================
 app.get("/", (req, res) => {
-  res.send("API OK 🚀");
+  res.send("🚀 API PUSH ONLINE");
 });
 
-// ==============================
-// REGISTER
-// ==============================
+// ===============================
+// 📝 REGISTER
+// ===============================
 app.post("/register", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -52,43 +48,17 @@ app.post("/register", async (req, res) => {
     });
 
     res.json(user);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({ error: "Erro ao registrar" });
   }
 });
 
-// ==============================
-// LOGIN
-// ==============================
-app.post("/login", async (req, res) => {
-  try {
-    const { email, password } = req.body;
-
-    const user = await User.findOne({ email });
-
-    if (!user) {
-      return res.status(404).json({ error: "Usuário não encontrado" });
-    }
-
-    const valid = await bcrypt.compare(password, user.password);
-
-    if (!valid) {
-      return res.status(401).json({ error: "Senha inválida" });
-    }
-
-    res.json({ message: "Login OK ✅" });
-
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ==============================
-// START SERVER
-// ==============================
+// ===============================
+// 🚀 START SERVER
+// ===============================
 const PORT = process.env.PORT || 10000;
 
 app.listen(PORT, () => {
   console.log(`🚀 API rodando na porta ${PORT}`);
 });
-```
