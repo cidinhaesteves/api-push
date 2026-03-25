@@ -1,102 +1,78 @@
-const express = require('express');
-const cors = require('cors');
-const admin = require('firebase-admin');
-const mongoose = require('mongoose');
+import express from "express";
+import cors from "cors";
+import mongoose from "mongoose";
 
+// ===============================
+// CONFIG
+// ===============================
 const app = express();
-
-// 🔥 CORS LIBERADO
-app.use(cors({
-  origin: "*",
-  methods: ["GET", "POST"],
-  allowedHeaders: ["Content-Type"]
-}));
-
+app.use(cors());
 app.use(express.json());
 
-// 🔥 FIREBASE ADMIN (VIA ENV - RENDER)
-const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+// ===============================
+// MONGODB CONNECTION (CORRIGIDO)
+// ===============================
+const MONGO_URI = process.env.MONGO_URI;
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
+if (!MONGO_URI) {
+  console.log("❌ ERRO: MONGO_URI não encontrada no ambiente");
+  process.exit(1);
+}
+
+mongoose.connect(MONGO_URI)
+  .then(() => console.log("✅ MongoDB conectado com sucesso"))
+  .catch((err) => {
+    console.log("❌ Erro ao conectar no MongoDB:", err);
+    process.exit(1);
+  });
+
+// ===============================
+// MODEL
+// ===============================
+const tokenSchema = new mongoose.Schema({
+  token: { type: String, required: true, unique: true }
 });
 
-// 🔥 MONGODB
-mongoose.connect('mongodb://127.0.0.1:27017/pushdb', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
-})
-.then(() => console.log("🟢 Mongo conectado"))
-.catch(err => console.log(err));
+const Token = mongoose.model("Token", tokenSchema);
 
-// 🔥 MODEL
-const TokenSchema = new mongoose.Schema({
-  token: { type: String, unique: true },
-  siteId: String,
-  createdAt: { type: Date, default: Date.now }
-});
+// ===============================
+// ROUTES
+// ===============================
 
-const Token = mongoose.model('Token', TokenSchema);
-
-// 🔥 ROTA TESTE
-app.get('/', (req, res) => {
+// teste
+app.get("/", (req, res) => {
   res.send("🚀 API PUSH ONLINE");
 });
 
-// 🔥 SALVAR TOKEN
-app.post('/save-token', async (req, res) => {
-  const { token, siteId } = req.body;
-
+// salvar token
+app.post("/save-token", async (req, res) => {
   try {
+    const { token } = req.body;
+
+    if (!token) {
+      return res.status(400).json({ error: "Token não enviado" });
+    }
+
     await Token.updateOne(
       { token },
-      { token, siteId },
+      { token },
       { upsert: true }
     );
 
-    console.log("✅ Token salvo:", token);
+    console.log("✅ Token salvo no MongoDB");
 
-    res.json({ success: true });
+    res.status(200).json({ message: "Token salvo com sucesso" });
 
-  } catch (err) {
-    console.error("❌ Erro ao salvar token:", err);
-    res.status(500).json({ error: err.message });
+  } catch (error) {
+    console.log("❌ Erro ao salvar token:", error);
+    res.status(500).json({ error: "Erro ao salvar token" });
   }
 });
 
-// 🔥 ENVIAR PUSH
-app.post('/send', async (req, res) => {
-  const { title, message, siteId } = req.body;
-
-  try {
-    const tokens = await Token.find({ siteId });
-
-    if (tokens.length === 0) {
-      return res.json({ success: false, message: "Nenhum token encontrado" });
-    }
-
-    const response = await admin.messaging().sendEachForMulticast({
-      tokens: tokens.map(t => t.token),
-      notification: {
-        title,
-        body: message
-      }
-    });
-
-    res.json({
-      success: true,
-      sent: response.successCount,
-      failed: response.failureCount
-    });
-
-  } catch (err) {
-    console.error("❌ Erro ao enviar push:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// 🔥 PORTA DINÂMICA (RENDER)
-const PORT = process.env.PORT || 3000;
+// ===============================
+// SERVER
+// ===============================
+const PORT = process.env.PORT || 10000;
 
 app.listen(PORT, () => {
   console.log(`🚀 API rodando na porta ${PORT}`);
