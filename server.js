@@ -4,176 +4,163 @@ import cors from "cors";
 import bcrypt from "bcrypt";
 import admin from "firebase-admin";
 import jwt from "jsonwebtoken";
+import cron from "node-cron";
 
 const app = express();
-
 app.use(express.json());
 app.use(cors());
 
 const JWT_SECRET = "SUA_CHAVE_SUPER_SECRETA";
 
-// ==============================
-// 🔥 FIREBASE
-// ==============================
+// ================= FIREBASE =================
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
 
-// ==============================
-// 🔌 MONGODB
-// ==============================
+// ================= MONGO =================
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB conectado"))
-  .catch(err => console.error("❌ Mongo erro:", err));
+  .catch(err => console.error(err));
 
-// ==============================
-// 👤 USER
-// ==============================
-const userSchema = new mongoose.Schema({
-  email: { type: String, unique: true },
-  password: String,
+// ================= MODELS =================
+const User = mongoose.model("User", {
+  email: String,
+  password: String
 });
-const User = mongoose.model("User", userSchema);
 
-// ==============================
-// 📲 LEADS
-// ==============================
-const leadSchema = new mongoose.Schema({
+const Lead = mongoose.model("Lead", {
   token: String,
-  segment: { type: String, default: "geral" },
+  segment: String
+});
+
+const Notification = mongoose.model("Notification", {
+  title: String,
+  body: String,
   createdAt: { type: Date, default: Date.now }
 });
-const Lead = mongoose.model("Lead", leadSchema);
 
-// ==============================
-// 🧾 HISTÓRICO (NOVO 🔥)
-// ==============================
-const notificationSchema = new mongoose.Schema({
+// 🔥 AGENDAMENTO
+const Schedule = mongoose.model("Schedule", {
   title: String,
   body: String,
   segment: String,
-  total: Number,
-  sent: Number,
-  failed: Number,
-  createdAt: { type: Date, default: Date.now }
+  sendAt: Date,
+  sent: { type: Boolean, default: false }
 });
 
-const Notification = mongoose.model("Notification", notificationSchema);
-
-// ==============================
-// 🔐 AUTH
-// ==============================
-function authMiddleware(req, res, next) {
-  const token = req.headers.authorization;
-
-  if (!token) return res.status(401).json({ error: "Token não enviado" });
-
+// ================= AUTH =================
+function auth(req, res, next) {
   try {
+    const token = req.headers.authorization;
     const decoded = jwt.verify(token.replace("Bearer ", ""), JWT_SECRET);
     req.user = decoded;
     next();
   } catch {
-    return res.status(401).json({ error: "Token inválido" });
+    res.status(401).json({ error: "Token inválido" });
   }
 }
 
-// ==============================
-// LOGIN
-// ==============================
+// ================= LOGIN =================
 app.post("/login", async (req, res) => {
-  try {
-    const { email, password } = req.body;
+  const { email, password } = req.body;
 
-    const user = await User.findOne({ email });
+  const user = await User.findOne({ email });
 
-    if (!user || !user.password) {
-      return res.status(400).json({ error: "Usuário inválido" });
-    }
-
-    const valid = await bcrypt.compare(password, user.password);
-
-    if (!valid) {
-      return res.status(400).json({ error: "Senha inválida" });
-    }
-
-    const token = jwt.sign({ id: user._id }, JWT_SECRET);
-
-    res.json({ token });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Erro no login" });
+  if (!user || !user.password) {
+    return res.status(400).json({ error: "Usuário inválido" });
   }
+
+  const valid = await bcrypt.compare(password, user.password);
+
+  if (!valid) {
+    return res.status(400).json({ error: "Senha inválida" });
+  }
+
+  const token = jwt.sign({ id: user._id }, JWT_SECRET);
+
+  res.json({ token });
 });
 
-// ==============================
-// SAVE TOKEN
-// ==============================
+// ================= SAVE TOKEN =================
 app.post("/save-token", async (req, res) => {
-  const { token, segment } = req.body;
-
+  const { token } = req.body;
   const exists = await Lead.findOne({ token });
 
-  if (exists) return res.json({ message: "Já existe" });
-
-  await Lead.create({ token, segment });
-
-  res.json({ message: "Salvo" });
-});
-
-// ==============================
-// 🚀 SEND PUSH (COM HISTÓRICO)
-// ==============================
-app.post("/send-push", authMiddleware, async (req, res) => {
-  try {
-    const { title, body, segment } = req.body;
-
-    const filter = segment && segment !== "all" ? { segment } : {};
-    const leads = await Lead.find(filter);
-
-    const tokens = leads.map(l => l.token);
-
-    const response = await admin.messaging().sendEachForMulticast({
-      notification: { title, body },
-      tokens
-    });
-
-    // 🔥 SALVAR HISTÓRICO
-    await Notification.create({
-      title,
-      body,
-      segment,
-      total: tokens.length,
-      sent: response.successCount,
-      failed: response.failureCount
-    });
-
-    res.json({
-      success: true,
-      total: tokens.length,
-      sent: response.successCount,
-      failed: response.failureCount
-    });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Erro ao enviar" });
+  if (!exists) {
+    await Lead.create({ token });
   }
+
+  res.json({ ok: true });
 });
 
-// ==============================
-// 📊 BUSCAR HISTÓRICO
-// ==============================
-app.get("/notifications", authMiddleware, async (req, res) => {
-  const data = await Notification.find().sort({ createdAt: -1 });
+// ================= SEND PUSH =================
+async function sendPush({ title, body, segment }) {
+  const leads = await Lead.find(segment ? { segment } : {});
+  const tokens = leads.map(l => l.token);
+
+  if (tokens.length === 0) return;
+
+  const response = await admin.messaging().sendEachForMulticast({
+    notification: { title, body },
+    tokens
+  });
+
+  await Notification.create({
+    title,
+    body
+  });
+
+  console.log("🚀 Push enviado:", title);
+}
+
+// ================= DISPARO MANUAL =================
+app.post("/send-push", auth, async (req, res) => {
+  await sendPush(req.body);
+  res.json({ success: true });
+});
+
+// ================= AGENDAR PUSH =================
+app.post("/schedule", auth, async (req, res) => {
+  const { title, body, sendAt, segment } = req.body;
+
+  await Schedule.create({
+    title,
+    body,
+    sendAt,
+    segment
+  });
+
+  res.json({ success: true });
+});
+
+// ================= LISTAR AGENDADOS =================
+app.get("/schedules", auth, async (req, res) => {
+  const data = await Schedule.find().sort({ sendAt: 1 });
   res.json(data);
 });
 
-// ==============================
-// 👤 ADMIN AUTO
-// ==============================
+// ================= CRON (VERIFICA A CADA MINUTO) =================
+cron.schedule("* * * * *", async () => {
+  const now = new Date();
+
+  const schedules = await Schedule.find({
+    sendAt: { $lte: now },
+    sent: false
+  });
+
+  for (const item of schedules) {
+    await sendPush(item);
+
+    item.sent = true;
+    await item.save();
+
+    console.log("⏰ Push automático enviado:", item.title);
+  }
+});
+
+// ================= ADMIN AUTO =================
 async function createAdmin() {
   const email = "admin@email.com";
   const password = "123456";
@@ -189,6 +176,6 @@ async function createAdmin() {
 
 mongoose.connection.once("open", () => createAdmin());
 
-// ==============================
+// ================= START =================
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log("🚀 Rodando"));
+app.listen(PORT, () => console.log("🚀 API rodando"));
