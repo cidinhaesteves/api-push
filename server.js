@@ -127,6 +127,7 @@ app.post("/login", async (req, res) => {
     res.json({ token });
 
   } catch (error) {
+    console.error("❌ ERRO LOGIN:", error);
     res.status(500).json({ error: "Erro no login" });
   }
 });
@@ -186,8 +187,41 @@ app.post("/send-push", authMiddleware, async (req, res) => {
     });
 
   } catch (error) {
+    console.error("❌ ERRO PUSH:", error);
     res.status(500).json({ error: "Erro ao enviar push" });
   }
+});
+
+// ==============================
+// 👤 CREATE ADMIN AUTO (🔥 NOVO)
+// ==============================
+async function createAdmin() {
+  const email = "admin@email.com";
+  const password = "123456";
+
+  try {
+    const exists = await User.findOne({ email });
+
+    if (!exists) {
+      const hash = await bcrypt.hash(password, 10);
+
+      await User.create({
+        email,
+        password: hash
+      });
+
+      console.log("✅ Admin criado automaticamente");
+    } else {
+      console.log("ℹ️ Admin já existe");
+    }
+  } catch (error) {
+    console.error("❌ ERRO AO CRIAR ADMIN:", error);
+  }
+}
+
+// chama quando conecta no banco
+mongoose.connection.once("open", () => {
+  createAdmin();
 });
 
 // ==============================
