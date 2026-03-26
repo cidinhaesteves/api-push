@@ -1,1 +1,180 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Agendamentos - New Push</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial;
+      background: linear-gradient(135deg, #0f172a, #1e293b);
+      color: white;
+      padding: 20px;
+    }
+
+    h1 {
+      color: #38bdf8;
+    }
+
+    .box {
+      background: #1e293b;
+      padding: 20px;
+      border-radius: 10px;
+      margin-bottom: 20px;
+    }
+
+    input, textarea {
+      width: 100%;
+      padding: 10px;
+      margin-bottom: 10px;
+      border-radius: 6px;
+      border: none;
+    }
+
+    button {
+      padding: 10px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+
+    .btn {
+      background: #22c55e;
+      width: 100%;
+    }
+
+    .item {
+      background: #334155;
+      padding: 15px;
+      border-radius: 8px;
+      margin-bottom: 10px;
+    }
+
+    .status-ok {
+      color: #22c55e;
+    }
+
+    .status-wait {
+      color: #facc15;
+    }
+
+    .cancel {
+      background: #ef4444;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+
+<body>
+
+<h1>⏰ Agendamentos</h1>
+
+<div class="box">
+  <input id="title" placeholder="Título">
+  <textarea id="body" placeholder="Mensagem"></textarea>
+  <input id="date" type="datetime-local">
+
+  <button class="btn" onclick="createSchedule()">Agendar Push</button>
+</div>
+
+<div class="box">
+  <h3>📋 Lista de Agendamentos</h3>
+  <div id="list"></div>
+</div>
+
+<script>
+const API = "https://api-push.onrender.com";
+const token = localStorage.getItem("token");
+
+if (!token) {
+  alert("Não autorizado");
+  window.location.href = "index.html";
+}
+
+// ================= CRIAR AGENDAMENTO =================
+async function createSchedule() {
+  const title = document.getElementById("title").value;
+  const body = document.getElementById("body").value;
+  const date = document.getElementById("date").value;
+
+  if (!title || !body || !date) {
+    alert("Preencha tudo");
+    return;
+  }
+
+  await fetch(API + "/schedule", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer " + token
+    },
+    body: JSON.stringify({
+      title,
+      body,
+      sendAt: date
+    })
+  });
+
+  alert("Agendado com sucesso 🚀");
+
+  loadSchedules();
+}
+
+// ================= LISTAR =================
+async function loadSchedules() {
+  const res = await fetch(API + "/schedules", {
+    headers: {
+      "Authorization": "Bearer " + token
+    }
+  });
+
+  const data = await res.json();
+
+  const list = document.getElementById("list");
+  list.innerHTML = "";
+
+  data.forEach(item => {
+    const div = document.createElement("div");
+    div.className = "item";
+
+    const status = item.sent
+      ? `<span class="status-ok">✔ Enviado</span>`
+      : `<span class="status-wait">⏳ Pendente</span>`;
+
+    div.innerHTML = `
+      <strong>${item.title}</strong><br>
+      ${item.body}<br><br>
+
+      📅 Agendado: ${new Date(item.sendAt).toLocaleString()}<br>
+      ${item.executedAt ? "🚀 Executado: " + new Date(item.executedAt).toLocaleString() : ""}<br><br>
+
+      Status: ${status}
+
+      ${!item.sent ? `<button class="cancel" onclick="cancel('${item._id}')">Cancelar</button>` : ""}
+    `;
+
+    list.appendChild(div);
+  });
+}
+
+// ================= CANCELAR =================
+async function cancel(id) {
+  await fetch(API + "/schedule/" + id, {
+    method: "DELETE",
+    headers: {
+      "Authorization": "Bearer " + token
+    }
+  });
+
+  alert("Cancelado");
+  loadSchedules();
+}
+
+loadSchedules();
+</script>
+
+</body>
+</html>
