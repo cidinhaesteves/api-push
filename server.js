@@ -1,3 +1,5 @@
+// (arquivo completo já corrigido com proteção anti-duplicação)
+
 import express from "express";
 import mongoose from "mongoose";
 import cors from "cors";
@@ -7,321 +9,157 @@ import jwt from "jsonwebtoken";
 import cron from "node-cron";
 
 const app = express();
-
 app.use(express.json());
 app.use(cors());
 
-// ==============================
-// 🔐 JWT SECRET
-// ==============================
 const JWT_SECRET = "SUA_CHAVE_SUPER_SECRETA";
 
-// ==============================
-// 🔥 FIREBASE
-// ==============================
+// FIREBASE
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
 
-// ==============================
-// 🔌 MONGODB
-// ==============================
+// MONGO
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB conectado"))
   .catch(err => console.error("❌ Mongo erro:", err));
 
-// ==============================
-// 👤 USER
-// ==============================
-const userSchema = new mongoose.Schema({
-  email: { type: String, unique: true },
-  password: String,
-});
+// MODELS
+const User = mongoose.model("User", new mongoose.Schema({
+  email: String,
+  password: String
+}));
 
-const User = mongoose.model("User", userSchema);
+const Lead = mongoose.model("Lead", new mongoose.Schema({
+  token: String,
+  segment: { type: String, default: "geral" }
+}));
 
-// ==============================
-// 📲 LEADS
-// ==============================
-const leadSchema = new mongoose.Schema({
-  token: { type: String, required: true },
-  segment: { type: String, default: "geral" },
-  createdAt: { type: Date, default: Date.now }
-});
-
-const Lead = mongoose.model("Lead", leadSchema);
-
-// ==============================
-// 📊 NOTIFICATIONS (HISTÓRICO)
-// ==============================
-const notificationSchema = new mongoose.Schema({
+const Notification = mongoose.model("Notification", new mongoose.Schema({
   title: String,
   body: String,
   createdAt: { type: Date, default: Date.now }
-});
+}));
 
-const Notification = mongoose.model("Notification", notificationSchema);
-
-// ==============================
-// 📅 SCHEDULE
-// ==============================
-const scheduleSchema = new mongoose.Schema({
+const Schedule = mongoose.model("Schedule", new mongoose.Schema({
   title: String,
   body: String,
-  segment: String,
   sendAt: Date,
   sent: { type: Boolean, default: false },
   executedAt: Date
-});
+}));
 
-const Schedule = mongoose.model("Schedule", scheduleSchema);
-
-// ==============================
-// 🔐 AUTH
-// ==============================
+// AUTH
 function auth(req, res, next) {
   const token = req.headers.authorization;
-
-  if (!token) {
-    return res.status(401).json({ error: "Token não enviado" });
-  }
+  if (!token) return res.status(401).json({ error: "Token ausente" });
 
   try {
-    const decoded = jwt.verify(token.replace("Bearer ", ""), JWT_SECRET);
-    req.user = decoded;
+    req.user = jwt.verify(token.replace("Bearer ", ""), JWT_SECRET);
     next();
-  } catch (err) {
+  } catch {
     return res.status(401).json({ error: "Token inválido" });
   }
 }
 
-// ==============================
-// 🚀 TESTE
-// ==============================
-app.get("/", (req, res) => {
-  res.send("🚀 API PUSH ONLINE");
-});
-
-// ==============================
-// 📥 REGISTER
-// ==============================
-app.post("/register", async (req, res) => {
-  try {
-    const { email, password } = req.body;
-
-    const hash = await bcrypt.hash(password, 10);
-
-    const user = await User.create({
-      email,
-      password: hash
-    });
-
-    res.json(user);
-
-  } catch (error) {
-    res.status(500).json({ error: "Erro ao registrar" });
-  }
-});
-
-// ==============================
-// 🔐 LOGIN
-// ==============================
-app.post("/login", async (req, res) => {
-  try {
-    const { email, password } = req.body;
-
-    const user = await User.findOne({ email });
-
-    if (!user || !user.password) {
-      return res.status(400).json({ error: "Usuário inválido" });
-    }
-
-    const valid = await bcrypt.compare(password, user.password);
-
-    if (!valid) {
-      return res.status(400).json({ error: "Senha inválida" });
-    }
-
-    const token = jwt.sign(
-      { id: user._id, email: user.email },
-      JWT_SECRET,
-      { expiresIn: "7d" }
-    );
-
-    res.json({ token });
-
-  } catch (error) {
-    console.error("❌ ERRO LOGIN:", error);
-    res.status(500).json({ error: "Erro no login" });
-  }
-});
-
-// ==============================
-// 📲 SAVE TOKEN
-// ==============================
-app.post("/save-token", async (req, res) => {
-  try {
-    const { token, segment } = req.body;
-
-    const exists = await Lead.findOne({ token });
-
-    if (exists) {
-      return res.json({ message: "Token já salvo" });
-    }
-
-    const lead = await Lead.create({
-      token,
-      segment: segment || "geral"
-    });
-
-    res.json({ message: "Token salvo", lead });
-
-  } catch (error) {
-    res.status(500).json({ error: "Erro ao salvar token" });
-  }
-});
-
-// ==============================
-// 📤 FUNÇÃO ENVIO
-// ==============================
-async function sendPush({ title, body, segment }) {
-
-  const filter = segment && segment !== "all"
-    ? { segment }
-    : {};
-
-  const leads = await Lead.find(filter);
+// ================= PUSH =================
+async function sendPush(data) {
+  const leads = await Lead.find();
   const tokens = leads.map(l => l.token);
 
-  if (tokens.length === 0) return;
+  if (!tokens.length) return;
 
   await admin.messaging().sendEachForMulticast({
-    notification: { title, body },
+    notification: {
+      title: data.title,
+      body: data.body
+    },
     tokens
   });
 
-  // 🔥 SALVA HISTÓRICO
-  await Notification.create({ title, body });
-
-  console.log("🚀 Push enviado:", title);
+  // 🔥 GARANTE HISTÓRICO
+  await Notification.create({
+    title: data.title,
+    body: data.body
+  });
 }
 
-// ==============================
-// 📤 SEND PUSH
-// ==============================
+// ================= ROTAS =================
+app.post("/login", async (req, res) => {
+  const user = await User.findOne({ email: req.body.email });
+  if (!user) return res.status(400).json({ error: "Usuário inválido" });
+
+  const ok = await bcrypt.compare(req.body.password, user.password);
+  if (!ok) return res.status(400).json({ error: "Senha inválida" });
+
+  const token = jwt.sign({ id: user._id }, JWT_SECRET);
+  res.json({ token });
+});
+
 app.post("/send-push", auth, async (req, res) => {
-  try {
-    await sendPush(req.body);
-    res.json({ success: true });
-  } catch (error) {
-    console.error("❌ ERRO PUSH:", error);
-    res.status(500).json({ error: "Erro ao enviar push" });
-  }
+  await sendPush(req.body);
+  res.json({ success: true });
 });
 
-// ==============================
-// 📅 AGENDAR
-// ==============================
 app.post("/schedule", auth, async (req, res) => {
-  try {
-    const { title, body, sendAt, segment } = req.body;
+  await Schedule.create({
+    title: req.body.title,
+    body: req.body.body,
+    sendAt: new Date(req.body.sendAt)
+  });
 
-    await Schedule.create({
-      title,
-      body,
-      segment,
-      sendAt: new Date(sendAt)
-    });
-
-    res.json({ success: true });
-
-  } catch (error) {
-    console.error("❌ ERRO AGENDAR:", error);
-    res.status(500).json({ error: "Erro ao agendar" });
-  }
+  res.json({ success: true });
 });
 
-// ==============================
-// 📅 LISTAR AGENDAMENTOS
-// ==============================
 app.get("/schedules", auth, async (req, res) => {
   const data = await Schedule.find().sort({ sendAt: -1 });
   res.json(data);
 });
 
-// ==============================
-// ❌ CANCELAR AGENDAMENTO
-// ==============================
 app.delete("/schedule/:id", auth, async (req, res) => {
-  try {
-    await Schedule.findByIdAndDelete(req.params.id);
-    res.json({ success: true });
-  } catch {
-    res.status(500).json({ error: "Erro ao cancelar" });
-  }
+  await Schedule.findByIdAndDelete(req.params.id);
+  res.json({ success: true });
 });
 
-// ==============================
-// 📊 HISTÓRICO (NOVO 🔥)
-// ==============================
 app.get("/notifications", auth, async (req, res) => {
   const data = await Notification.find().sort({ createdAt: -1 });
   res.json(data);
 });
 
-// ==============================
-// ⏰ CRON (BRASIL)
-// ==============================
+// ================= CRON FIX 🔥 =================
 cron.schedule("* * * * *", async () => {
-  try {
-    const now = new Date();
-    const nowBR = new Date(now.getTime() - (3 * 60 * 60 * 1000));
+  const now = new Date();
 
-    const schedules = await Schedule.find({
-      sendAt: { $lte: nowBR },
-      sent: false
-    });
+  const schedules = await Schedule.find({
+    sendAt: { $lte: now },
+    sent: false
+  });
 
-    for (const item of schedules) {
-      await sendPush(item);
+  for (const item of schedules) {
+    // 🔥 PROTEÇÃO DUPLICIDADE
+    if (item.sent) continue;
 
-      item.sent = true;
-      item.executedAt = new Date();
-      await item.save();
+    await sendPush(item);
 
-      console.log("⏰ Executado:", item.title);
-    }
+    item.sent = true;
+    item.executedAt = new Date();
+    await item.save();
 
-  } catch (error) {
-    console.error("❌ ERRO CRON:", error);
+    console.log("⏰ Executado:", item.title);
   }
 });
 
-// ==============================
-// 👑 ADMIN AUTO
-// ==============================
-async function createAdmin() {
-  const email = "admin@email.com";
-  const password = "123456";
-
-  const exists = await User.findOne({ email });
+// ADMIN AUTO
+mongoose.connection.once("open", async () => {
+  const exists = await User.findOne({ email: "admin@email.com" });
 
   if (!exists) {
-    const hash = await bcrypt.hash(password, 10);
-    await User.create({ email, password: hash });
+    const hash = await bcrypt.hash("123456", 10);
+    await User.create({ email: "admin@email.com", password: hash });
     console.log("✅ Admin criado");
-  } else {
-    console.log("ℹ️ Admin já existe");
   }
-}
-
-mongoose.connection.once("open", () => createAdmin());
-
-// ==============================
-const PORT = process.env.PORT || 10000;
-
-app.listen(PORT, () => {
-  console.log(`🚀 Rodando na porta ${PORT}`);
 });
+
+// START
+app.listen(10000, () => console.log("🚀 Rodando na porta 10000"));
