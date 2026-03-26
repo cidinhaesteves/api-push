@@ -41,7 +41,7 @@ const Notification = mongoose.model("Notification", {
   createdAt: { type: Date, default: Date.now }
 });
 
-// 🔥 AGENDAMENTO (COM HISTÓRICO)
+// 🔥 AGENDAMENTOS
 const Schedule = mongoose.model("Schedule", {
   title: String,
   body: String,
@@ -80,7 +80,11 @@ app.post("/login", async (req, res) => {
       return res.status(400).json({ error: "Senha inválida" });
     }
 
-    const token = jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: "7d" });
+    const token = jwt.sign(
+      { id: user._id },
+      JWT_SECRET,
+      { expiresIn: "7d" }
+    );
 
     res.json({ token });
 
@@ -125,7 +129,7 @@ async function sendPush({ title, body, segment }) {
   console.log("🚀 Push enviado:", title);
 }
 
-// ================= DISPARO MANUAL =================
+// ================= ENVIO MANUAL =================
 app.post("/send-push", auth, async (req, res) => {
   try {
     await sendPush(req.body);
@@ -144,8 +148,8 @@ app.post("/schedule", auth, async (req, res) => {
     await Schedule.create({
       title,
       body,
-      sendAt: new Date(sendAt),
-      segment
+      segment,
+      sendAt: new Date(sendAt)
     });
 
     res.json({ success: true });
@@ -162,12 +166,22 @@ app.get("/schedules", auth, async (req, res) => {
   res.json(data);
 });
 
-// ================= CRON (AJUSTADO PARA BRASIL 🔥) =================
+// ================= CANCELAR AGENDAMENTO =================
+app.delete("/schedule/:id", auth, async (req, res) => {
+  try {
+    await Schedule.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch {
+    res.status(500).json({ error: "Erro ao cancelar" });
+  }
+});
+
+// ================= CRON (HORÁRIO BRASIL 🔥) =================
 cron.schedule("* * * * *", async () => {
   try {
     const now = new Date();
 
-    // 🔥 AJUSTE PARA HORÁRIO BR (UTC-3)
+    // 🔥 Ajuste UTC-3 (Brasil)
     const nowBR = new Date(now.getTime() - (3 * 60 * 60 * 1000));
 
     const schedules = await Schedule.find({
@@ -179,7 +193,7 @@ cron.schedule("* * * * *", async () => {
       await sendPush(item);
 
       item.sent = true;
-      item.executedAt = new Date(); // 🔥 salva quando executou
+      item.executedAt = new Date();
       await item.save();
 
       console.log("⏰ Push automático enviado:", item.title);
