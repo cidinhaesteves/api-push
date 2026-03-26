@@ -16,6 +16,19 @@
 
     h1 {
       color: #38bdf8;
+      margin-bottom: 10px;
+    }
+
+    .top-bar {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    select {
+      padding: 8px;
+      border-radius: 6px;
+      border: none;
     }
 
     .box {
@@ -49,21 +62,38 @@
     .item {
       background: #334155;
       padding: 15px;
-      border-radius: 8px;
-      margin-bottom: 10px;
+      border-radius: 10px;
+      margin-bottom: 12px;
+      transition: 0.2s;
     }
 
-    .status-ok {
+    .item:hover {
+      transform: scale(1.01);
+    }
+
+    .status {
+      font-weight: bold;
+      margin-top: 5px;
+    }
+
+    .ok {
       color: #22c55e;
     }
 
-    .status-wait {
+    .wait {
       color: #facc15;
     }
 
     .cancel {
       background: #ef4444;
       margin-top: 10px;
+      width: 100%;
+    }
+
+    .meta {
+      font-size: 12px;
+      opacity: 0.7;
+      margin-top: 5px;
     }
   </style>
 </head>
@@ -71,6 +101,14 @@
 <body>
 
 <h1>⏰ Agendamentos</h1>
+
+<div class="top-bar">
+  <select id="filter" onchange="loadSchedules()">
+    <option value="all">Todos</option>
+    <option value="pending">Pendentes</option>
+    <option value="sent">Enviados</option>
+  </select>
+</div>
 
 <div class="box">
   <input id="title" placeholder="Título">
@@ -81,7 +119,7 @@
 </div>
 
 <div class="box">
-  <h3>📋 Lista de Agendamentos</h3>
+  <h3>📋 Lista</h3>
   <div id="list"></div>
 </div>
 
@@ -94,7 +132,7 @@ if (!token) {
   window.location.href = "index.html";
 }
 
-// ================= CRIAR AGENDAMENTO =================
+// ================= CRIAR =================
 async function createSchedule() {
   const title = document.getElementById("title").value;
   const body = document.getElementById("body").value;
@@ -118,20 +156,30 @@ async function createSchedule() {
     })
   });
 
-  alert("Agendado com sucesso 🚀");
-
+  alert("Agendado 🚀");
   loadSchedules();
 }
 
 // ================= LISTAR =================
 async function loadSchedules() {
+  const filter = document.getElementById("filter").value;
+
   const res = await fetch(API + "/schedules", {
     headers: {
       "Authorization": "Bearer " + token
     }
   });
 
-  const data = await res.json();
+  let data = await res.json();
+
+  // 🔥 FILTRO
+  if (filter === "pending") {
+    data = data.filter(i => !i.sent);
+  }
+
+  if (filter === "sent") {
+    data = data.filter(i => i.sent);
+  }
 
   const list = document.getElementById("list");
   list.innerHTML = "";
@@ -141,17 +189,17 @@ async function loadSchedules() {
     div.className = "item";
 
     const status = item.sent
-      ? `<span class="status-ok">✔ Enviado</span>`
-      : `<span class="status-wait">⏳ Pendente</span>`;
+      ? `<span class="status ok">✔ Enviado</span>`
+      : `<span class="status wait">⏳ Pendente</span>`;
 
     div.innerHTML = `
-      <strong>${item.title}</strong><br>
-      ${item.body}<br><br>
+      <strong>${item.title}</strong>
+      <div>${item.body}</div>
 
-      📅 Agendado: ${new Date(item.sendAt).toLocaleString()}<br>
-      ${item.executedAt ? "🚀 Executado: " + new Date(item.executedAt).toLocaleString() : ""}<br><br>
+      <div class="meta">📅 Agendado: ${new Date(item.sendAt).toLocaleString()}</div>
+      ${item.executedAt ? `<div class="meta">🚀 Executado: ${new Date(item.executedAt).toLocaleString()}</div>` : ""}
 
-      Status: ${status}
+      ${status}
 
       ${!item.sent ? `<button class="cancel" onclick="cancel('${item._id}')">Cancelar</button>` : ""}
     `;
@@ -162,6 +210,8 @@ async function loadSchedules() {
 
 // ================= CANCELAR =================
 async function cancel(id) {
+  if (!confirm("Cancelar agendamento?")) return;
+
   await fetch(API + "/schedule/" + id, {
     method: "DELETE",
     headers: {
@@ -169,7 +219,6 @@ async function cancel(id) {
     }
   });
 
-  alert("Cancelado");
   loadSchedules();
 }
 
