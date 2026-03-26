@@ -100,7 +100,7 @@ app.post("/register", async (req, res) => {
 });
 
 // ==============================
-// 🔐 LOGIN
+// 🔐 LOGIN (CORRIGIDO 🔥)
 // ==============================
 app.post("/login", async (req, res) => {
   try {
@@ -110,6 +110,10 @@ app.post("/login", async (req, res) => {
 
     if (!user) {
       return res.status(400).json({ error: "Usuário não encontrado" });
+    }
+
+    if (!user.password) {
+      return res.status(400).json({ error: "Usuário inválido" });
     }
 
     const valid = await bcrypt.compare(password, user.password);
@@ -193,13 +197,20 @@ app.post("/send-push", authMiddleware, async (req, res) => {
 });
 
 // ==============================
-// 👤 CREATE ADMIN AUTO (🔥 NOVO)
+// 👤 CREATE ADMIN AUTO (FIX 🔥)
 // ==============================
 async function createAdmin() {
   const email = "admin@email.com";
   const password = "123456";
 
   try {
+    const existing = await User.findOne({ email });
+
+    if (existing && !existing.password) {
+      await User.deleteOne({ email });
+      console.log("⚠️ Admin corrompido removido");
+    }
+
     const exists = await User.findOne({ email });
 
     if (!exists) {
@@ -210,10 +221,11 @@ async function createAdmin() {
         password: hash
       });
 
-      console.log("✅ Admin criado automaticamente");
+      console.log("✅ Admin criado corretamente");
     } else {
       console.log("ℹ️ Admin já existe");
     }
+
   } catch (error) {
     console.error("❌ ERRO AO CRIAR ADMIN:", error);
   }
