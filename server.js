@@ -10,9 +10,6 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-// ==============================
-// 🔐 JWT SECRET
-// ==============================
 const JWT_SECRET = "SUA_CHAVE_SUPER_SECRETA";
 
 // ==============================
@@ -38,69 +35,52 @@ const userSchema = new mongoose.Schema({
   email: { type: String, unique: true },
   password: String,
 });
-
 const User = mongoose.model("User", userSchema);
 
 // ==============================
 // 📲 LEADS
 // ==============================
 const leadSchema = new mongoose.Schema({
-  token: { type: String, required: true },
+  token: String,
   segment: { type: String, default: "geral" },
   createdAt: { type: Date, default: Date.now }
 });
-
 const Lead = mongoose.model("Lead", leadSchema);
 
 // ==============================
-// 🔐 MIDDLEWARE AUTH
+// 🧾 HISTÓRICO (NOVO 🔥)
+// ==============================
+const notificationSchema = new mongoose.Schema({
+  title: String,
+  body: String,
+  segment: String,
+  total: Number,
+  sent: Number,
+  failed: Number,
+  createdAt: { type: Date, default: Date.now }
+});
+
+const Notification = mongoose.model("Notification", notificationSchema);
+
+// ==============================
+// 🔐 AUTH
 // ==============================
 function authMiddleware(req, res, next) {
   const token = req.headers.authorization;
 
-  if (!token) {
-    return res.status(401).json({ error: "Token não enviado" });
-  }
+  if (!token) return res.status(401).json({ error: "Token não enviado" });
 
   try {
     const decoded = jwt.verify(token.replace("Bearer ", ""), JWT_SECRET);
     req.user = decoded;
     next();
-  } catch (err) {
+  } catch {
     return res.status(401).json({ error: "Token inválido" });
   }
 }
 
 // ==============================
-// 🚀 TESTE
-// ==============================
-app.get("/", (req, res) => {
-  res.send("🚀 API PUSH ONLINE");
-});
-
-// ==============================
-// 📥 REGISTER
-// ==============================
-app.post("/register", async (req, res) => {
-  try {
-    const { email, password } = req.body;
-
-    const hash = await bcrypt.hash(password, 10);
-
-    const user = await User.create({
-      email,
-      password: hash
-    });
-
-    res.json(user);
-
-  } catch (error) {
-    res.status(500).json({ error: "Erro ao registrar" });
-  }
-});
-
-// ==============================
-// 🔐 LOGIN (CORRIGIDO 🔥)
+// LOGIN
 // ==============================
 app.post("/login", async (req, res) => {
   try {
@@ -108,11 +88,7 @@ app.post("/login", async (req, res) => {
 
     const user = await User.findOne({ email });
 
-    if (!user) {
-      return res.status(400).json({ error: "Usuário não encontrado" });
-    }
-
-    if (!user.password) {
+    if (!user || !user.password) {
       return res.status(400).json({ error: "Usuário inválido" });
     }
 
@@ -122,66 +98,57 @@ app.post("/login", async (req, res) => {
       return res.status(400).json({ error: "Senha inválida" });
     }
 
-    const token = jwt.sign(
-      { id: user._id, email: user.email },
-      JWT_SECRET,
-      { expiresIn: "7d" }
-    );
+    const token = jwt.sign({ id: user._id }, JWT_SECRET);
 
     res.json({ token });
 
-  } catch (error) {
-    console.error("❌ ERRO LOGIN:", error);
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ error: "Erro no login" });
   }
 });
 
 // ==============================
-// 📲 SAVE TOKEN
+// SAVE TOKEN
 // ==============================
 app.post("/save-token", async (req, res) => {
-  try {
-    const { token, segment } = req.body;
+  const { token, segment } = req.body;
 
-    const exists = await Lead.findOne({ token });
+  const exists = await Lead.findOne({ token });
 
-    if (exists) {
-      return res.json({ message: "Token já salvo" });
-    }
+  if (exists) return res.json({ message: "Já existe" });
 
-    const lead = await Lead.create({
-      token,
-      segment: segment || "geral"
-    });
+  await Lead.create({ token, segment });
 
-    res.json({ message: "Token salvo", lead });
-
-  } catch (error) {
-    res.status(500).json({ error: "Erro ao salvar token" });
-  }
+  res.json({ message: "Salvo" });
 });
 
 // ==============================
-// 📤 SEND PUSH (PROTEGIDO 🔥)
+// 🚀 SEND PUSH (COM HISTÓRICO)
 // ==============================
 app.post("/send-push", authMiddleware, async (req, res) => {
   try {
     const { title, body, segment } = req.body;
 
-    const filter = segment && segment !== "all"
-      ? { segment }
-      : {};
-
+    const filter = segment && segment !== "all" ? { segment } : {};
     const leads = await Lead.find(filter);
 
     const tokens = leads.map(l => l.token);
 
-    const message = {
+    const response = await admin.messaging().sendEachForMulticast({
       notification: { title, body },
       tokens
-    };
+    });
 
-    const response = await admin.messaging().sendEachForMulticast(message);
+    // 🔥 SALVAR HISTÓRICO
+    await Notification.create({
+      title,
+      body,
+      segment,
+      total: tokens.length,
+      sent: response.successCount,
+      failed: response.failureCount
+    });
 
     res.json({
       success: true,
@@ -190,55 +157,38 @@ app.post("/send-push", authMiddleware, async (req, res) => {
       failed: response.failureCount
     });
 
-  } catch (error) {
-    console.error("❌ ERRO PUSH:", error);
-    res.status(500).json({ error: "Erro ao enviar push" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Erro ao enviar" });
   }
 });
 
 // ==============================
-// 👤 CREATE ADMIN AUTO (FIX 🔥)
+// 📊 BUSCAR HISTÓRICO
+// ==============================
+app.get("/notifications", authMiddleware, async (req, res) => {
+  const data = await Notification.find().sort({ createdAt: -1 });
+  res.json(data);
+});
+
+// ==============================
+// 👤 ADMIN AUTO
 // ==============================
 async function createAdmin() {
   const email = "admin@email.com";
   const password = "123456";
 
-  try {
-    const existing = await User.findOne({ email });
+  const exists = await User.findOne({ email });
 
-    if (existing && !existing.password) {
-      await User.deleteOne({ email });
-      console.log("⚠️ Admin corrompido removido");
-    }
-
-    const exists = await User.findOne({ email });
-
-    if (!exists) {
-      const hash = await bcrypt.hash(password, 10);
-
-      await User.create({
-        email,
-        password: hash
-      });
-
-      console.log("✅ Admin criado corretamente");
-    } else {
-      console.log("ℹ️ Admin já existe");
-    }
-
-  } catch (error) {
-    console.error("❌ ERRO AO CRIAR ADMIN:", error);
+  if (!exists) {
+    const hash = await bcrypt.hash(password, 10);
+    await User.create({ email, password: hash });
+    console.log("✅ Admin criado");
   }
 }
 
-// chama quando conecta no banco
-mongoose.connection.once("open", () => {
-  createAdmin();
-});
+mongoose.connection.once("open", () => createAdmin());
 
 // ==============================
 const PORT = process.env.PORT || 10000;
-
-app.listen(PORT, () => {
-  console.log(`🚀 Rodando na porta ${PORT}`);
-});
+app.listen(PORT, () => console.log("🚀 Rodando"));
