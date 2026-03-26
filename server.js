@@ -7,42 +7,67 @@ import jwt from "jsonwebtoken";
 import cron from "node-cron";
 
 const app = express();
+
 app.use(express.json());
 app.use(cors());
 
+// ==============================
+// 🔐 JWT SECRET
+// ==============================
 const JWT_SECRET = "SUA_CHAVE_SUPER_SECRETA";
 
-// ================= FIREBASE =================
+// ==============================
+// 🔥 FIREBASE
+// ==============================
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
 
-// ================= MONGO =================
+// ==============================
+// 🔌 MONGODB
+// ==============================
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB conectado"))
-  .catch(err => console.error(err));
+  .catch(err => console.error("❌ Mongo erro:", err));
 
-// ================= MODELS =================
-const User = mongoose.model("User", {
-  email: String,
-  password: String
+// ==============================
+// 👤 USER
+// ==============================
+const userSchema = new mongoose.Schema({
+  email: { type: String, unique: true },
+  password: String,
 });
 
-const Lead = mongoose.model("Lead", {
-  token: String,
-  segment: String
+const User = mongoose.model("User", userSchema);
+
+// ==============================
+// 📲 LEADS
+// ==============================
+const leadSchema = new mongoose.Schema({
+  token: { type: String, required: true },
+  segment: { type: String, default: "geral" },
+  createdAt: { type: Date, default: Date.now }
 });
 
-const Notification = mongoose.model("Notification", {
+const Lead = mongoose.model("Lead", leadSchema);
+
+// ==============================
+// 📊 NOTIFICATIONS (HISTÓRICO)
+// ==============================
+const notificationSchema = new mongoose.Schema({
   title: String,
   body: String,
   createdAt: { type: Date, default: Date.now }
 });
 
-// 🔥 AGENDAMENTOS
-const Schedule = mongoose.model("Schedule", {
+const Notification = mongoose.model("Notification", notificationSchema);
+
+// ==============================
+// 📅 SCHEDULE
+// ==============================
+const scheduleSchema = new mongoose.Schema({
   title: String,
   body: String,
   segment: String,
@@ -51,19 +76,58 @@ const Schedule = mongoose.model("Schedule", {
   executedAt: Date
 });
 
-// ================= AUTH =================
+const Schedule = mongoose.model("Schedule", scheduleSchema);
+
+// ==============================
+// 🔐 AUTH
+// ==============================
 function auth(req, res, next) {
+  const token = req.headers.authorization;
+
+  if (!token) {
+    return res.status(401).json({ error: "Token não enviado" });
+  }
+
   try {
-    const token = req.headers.authorization;
     const decoded = jwt.verify(token.replace("Bearer ", ""), JWT_SECRET);
     req.user = decoded;
     next();
-  } catch {
-    res.status(401).json({ error: "Token inválido" });
+  } catch (err) {
+    return res.status(401).json({ error: "Token inválido" });
   }
 }
 
-// ================= LOGIN =================
+// ==============================
+// 🚀 TESTE
+// ==============================
+app.get("/", (req, res) => {
+  res.send("🚀 API PUSH ONLINE");
+});
+
+// ==============================
+// 📥 REGISTER
+// ==============================
+app.post("/register", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    const hash = await bcrypt.hash(password, 10);
+
+    const user = await User.create({
+      email,
+      password: hash
+    });
+
+    res.json(user);
+
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao registrar" });
+  }
+});
+
+// ==============================
+// 🔐 LOGIN
+// ==============================
 app.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -81,66 +145,85 @@ app.post("/login", async (req, res) => {
     }
 
     const token = jwt.sign(
-      { id: user._id },
+      { id: user._id, email: user.email },
       JWT_SECRET,
       { expiresIn: "7d" }
     );
 
     res.json({ token });
 
-  } catch (err) {
-    console.error("❌ ERRO LOGIN:", err);
+  } catch (error) {
+    console.error("❌ ERRO LOGIN:", error);
     res.status(500).json({ error: "Erro no login" });
   }
 });
 
-// ================= SAVE TOKEN =================
+// ==============================
+// 📲 SAVE TOKEN
+// ==============================
 app.post("/save-token", async (req, res) => {
-  const { token, segment } = req.body;
+  try {
+    const { token, segment } = req.body;
 
-  const exists = await Lead.findOne({ token });
+    const exists = await Lead.findOne({ token });
 
-  if (!exists) {
-    await Lead.create({ token, segment });
+    if (exists) {
+      return res.json({ message: "Token já salvo" });
+    }
+
+    const lead = await Lead.create({
+      token,
+      segment: segment || "geral"
+    });
+
+    res.json({ message: "Token salvo", lead });
+
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao salvar token" });
   }
-
-  res.json({ ok: true });
 });
 
-// ================= FUNÇÃO ENVIO =================
+// ==============================
+// 📤 FUNÇÃO ENVIO
+// ==============================
 async function sendPush({ title, body, segment }) {
-  const filter = segment && segment !== "all" ? { segment } : {};
-  const leads = await Lead.find(filter);
 
+  const filter = segment && segment !== "all"
+    ? { segment }
+    : {};
+
+  const leads = await Lead.find(filter);
   const tokens = leads.map(l => l.token);
 
   if (tokens.length === 0) return;
 
-  const response = await admin.messaging().sendEachForMulticast({
+  await admin.messaging().sendEachForMulticast({
     notification: { title, body },
     tokens
   });
 
-  await Notification.create({
-    title,
-    body
-  });
+  // 🔥 SALVA HISTÓRICO
+  await Notification.create({ title, body });
 
   console.log("🚀 Push enviado:", title);
 }
 
-// ================= ENVIO MANUAL =================
+// ==============================
+// 📤 SEND PUSH
+// ==============================
 app.post("/send-push", auth, async (req, res) => {
   try {
     await sendPush(req.body);
     res.json({ success: true });
-  } catch (err) {
-    console.error("❌ ERRO PUSH:", err);
+  } catch (error) {
+    console.error("❌ ERRO PUSH:", error);
     res.status(500).json({ error: "Erro ao enviar push" });
   }
 });
 
-// ================= AGENDAR =================
+// ==============================
+// 📅 AGENDAR
+// ==============================
 app.post("/schedule", auth, async (req, res) => {
   try {
     const { title, body, sendAt, segment } = req.body;
@@ -154,19 +237,23 @@ app.post("/schedule", auth, async (req, res) => {
 
     res.json({ success: true });
 
-  } catch (err) {
-    console.error("❌ ERRO AGENDAR:", err);
+  } catch (error) {
+    console.error("❌ ERRO AGENDAR:", error);
     res.status(500).json({ error: "Erro ao agendar" });
   }
 });
 
-// ================= LISTAR AGENDAMENTOS =================
+// ==============================
+// 📅 LISTAR AGENDAMENTOS
+// ==============================
 app.get("/schedules", auth, async (req, res) => {
-  const data = await Schedule.find().sort({ sendAt: 1 });
+  const data = await Schedule.find().sort({ sendAt: -1 });
   res.json(data);
 });
 
-// ================= CANCELAR AGENDAMENTO =================
+// ==============================
+// ❌ CANCELAR AGENDAMENTO
+// ==============================
 app.delete("/schedule/:id", auth, async (req, res) => {
   try {
     await Schedule.findByIdAndDelete(req.params.id);
@@ -176,12 +263,20 @@ app.delete("/schedule/:id", auth, async (req, res) => {
   }
 });
 
-// ================= CRON (HORÁRIO BRASIL 🔥) =================
+// ==============================
+// 📊 HISTÓRICO (NOVO 🔥)
+// ==============================
+app.get("/notifications", auth, async (req, res) => {
+  const data = await Notification.find().sort({ createdAt: -1 });
+  res.json(data);
+});
+
+// ==============================
+// ⏰ CRON (BRASIL)
+// ==============================
 cron.schedule("* * * * *", async () => {
   try {
     const now = new Date();
-
-    // 🔥 Ajuste UTC-3 (Brasil)
     const nowBR = new Date(now.getTime() - (3 * 60 * 60 * 1000));
 
     const schedules = await Schedule.find({
@@ -196,15 +291,17 @@ cron.schedule("* * * * *", async () => {
       item.executedAt = new Date();
       await item.save();
 
-      console.log("⏰ Push automático enviado:", item.title);
+      console.log("⏰ Executado:", item.title);
     }
 
-  } catch (err) {
-    console.error("❌ ERRO CRON:", err);
+  } catch (error) {
+    console.error("❌ ERRO CRON:", error);
   }
 });
 
-// ================= ADMIN AUTO =================
+// ==============================
+// 👑 ADMIN AUTO
+// ==============================
 async function createAdmin() {
   const email = "admin@email.com";
   const password = "123456";
@@ -222,9 +319,9 @@ async function createAdmin() {
 
 mongoose.connection.once("open", () => createAdmin());
 
-// ================= START =================
+// ==============================
 const PORT = process.env.PORT || 10000;
 
 app.listen(PORT, () => {
-  console.log(`🚀 API rodando na porta ${PORT}`);
+  console.log(`🚀 Rodando na porta ${PORT}`);
 });
