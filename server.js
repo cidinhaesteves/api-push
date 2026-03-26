@@ -41,13 +41,14 @@ const Notification = mongoose.model("Notification", {
   createdAt: { type: Date, default: Date.now }
 });
 
-// 🔥 AGENDAMENTO
+// 🔥 AGENDAMENTO (COM HISTÓRICO)
 const Schedule = mongoose.model("Schedule", {
   title: String,
   body: String,
   segment: String,
   sendAt: Date,
-  sent: { type: Boolean, default: false }
+  sent: { type: Boolean, default: false },
+  executedAt: Date
 });
 
 // ================= AUTH =================
@@ -64,40 +65,49 @@ function auth(req, res, next) {
 
 // ================= LOGIN =================
 app.post("/login", async (req, res) => {
-  const { email, password } = req.body;
+  try {
+    const { email, password } = req.body;
 
-  const user = await User.findOne({ email });
+    const user = await User.findOne({ email });
 
-  if (!user || !user.password) {
-    return res.status(400).json({ error: "Usuário inválido" });
+    if (!user || !user.password) {
+      return res.status(400).json({ error: "Usuário inválido" });
+    }
+
+    const valid = await bcrypt.compare(password, user.password);
+
+    if (!valid) {
+      return res.status(400).json({ error: "Senha inválida" });
+    }
+
+    const token = jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: "7d" });
+
+    res.json({ token });
+
+  } catch (err) {
+    console.error("❌ ERRO LOGIN:", err);
+    res.status(500).json({ error: "Erro no login" });
   }
-
-  const valid = await bcrypt.compare(password, user.password);
-
-  if (!valid) {
-    return res.status(400).json({ error: "Senha inválida" });
-  }
-
-  const token = jwt.sign({ id: user._id }, JWT_SECRET);
-
-  res.json({ token });
 });
 
 // ================= SAVE TOKEN =================
 app.post("/save-token", async (req, res) => {
-  const { token } = req.body;
+  const { token, segment } = req.body;
+
   const exists = await Lead.findOne({ token });
 
   if (!exists) {
-    await Lead.create({ token });
+    await Lead.create({ token, segment });
   }
 
   res.json({ ok: true });
 });
 
-// ================= SEND PUSH =================
+// ================= FUNÇÃO ENVIO =================
 async function sendPush({ title, body, segment }) {
-  const leads = await Lead.find(segment ? { segment } : {});
+  const filter = segment && segment !== "all" ? { segment } : {};
+  const leads = await Lead.find(filter);
+
   const tokens = leads.map(l => l.token);
 
   if (tokens.length === 0) return;
@@ -117,46 +127,66 @@ async function sendPush({ title, body, segment }) {
 
 // ================= DISPARO MANUAL =================
 app.post("/send-push", auth, async (req, res) => {
-  await sendPush(req.body);
-  res.json({ success: true });
+  try {
+    await sendPush(req.body);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("❌ ERRO PUSH:", err);
+    res.status(500).json({ error: "Erro ao enviar push" });
+  }
 });
 
-// ================= AGENDAR PUSH =================
+// ================= AGENDAR =================
 app.post("/schedule", auth, async (req, res) => {
-  const { title, body, sendAt, segment } = req.body;
+  try {
+    const { title, body, sendAt, segment } = req.body;
 
-  await Schedule.create({
-    title,
-    body,
-    sendAt,
-    segment
-  });
+    await Schedule.create({
+      title,
+      body,
+      sendAt: new Date(sendAt),
+      segment
+    });
 
-  res.json({ success: true });
+    res.json({ success: true });
+
+  } catch (err) {
+    console.error("❌ ERRO AGENDAR:", err);
+    res.status(500).json({ error: "Erro ao agendar" });
+  }
 });
 
-// ================= LISTAR AGENDADOS =================
+// ================= LISTAR AGENDAMENTOS =================
 app.get("/schedules", auth, async (req, res) => {
   const data = await Schedule.find().sort({ sendAt: 1 });
   res.json(data);
 });
 
-// ================= CRON (VERIFICA A CADA MINUTO) =================
+// ================= CRON (AJUSTADO PARA BRASIL 🔥) =================
 cron.schedule("* * * * *", async () => {
-  const now = new Date();
+  try {
+    const now = new Date();
 
-  const schedules = await Schedule.find({
-    sendAt: { $lte: now },
-    sent: false
-  });
+    // 🔥 AJUSTE PARA HORÁRIO BR (UTC-3)
+    const nowBR = new Date(now.getTime() - (3 * 60 * 60 * 1000));
 
-  for (const item of schedules) {
-    await sendPush(item);
+    const schedules = await Schedule.find({
+      sendAt: { $lte: nowBR },
+      sent: false
+    });
 
-    item.sent = true;
-    await item.save();
+    for (const item of schedules) {
+      await sendPush(item);
 
-    console.log("⏰ Push automático enviado:", item.title);
+      item.sent = true;
+      item.executedAt = new Date(); // 🔥 salva quando executou
+      await item.save();
+
+      console.log("⏰ Push automático enviado:", item.title);
+    }
+
+  } catch (err) {
+    console.error("❌ ERRO CRON:", err);
   }
 });
 
@@ -171,6 +201,8 @@ async function createAdmin() {
     const hash = await bcrypt.hash(password, 10);
     await User.create({ email, password: hash });
     console.log("✅ Admin criado");
+  } else {
+    console.log("ℹ️ Admin já existe");
   }
 }
 
@@ -178,4 +210,7 @@ mongoose.connection.once("open", () => createAdmin());
 
 // ================= START =================
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log("🚀 API rodando"));
+
+app.listen(PORT, () => {
+  console.log(`🚀 API rodando na porta ${PORT}`);
+});
