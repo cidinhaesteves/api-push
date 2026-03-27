@@ -1,102 +1,82 @@
 import express from "express";
-import mongoose from "mongoose";
 import cors from "cors";
-import jwt from "jsonwebtoken";
+import admin from "firebase-admin";
 
 const app = express();
-
 app.use(cors());
 app.use(express.json());
 
-// ============================
-// CONFIG
-// ============================
+// 🔥 FIREBASE ADMIN
+import serviceAccount from "./serviceAccountKey.json" assert { type: "json" };
 
-const MONGO_URI = process.env.MONGO_URI;
-const JWT_SECRET = "123456"; // pode melhorar depois
+admin.initializeApp({
+credential: admin.credential.cert(serviceAccount)
+});
 
-// ============================
-// MONGO
-// ============================
+// ==============================
+// TESTE
+// ==============================
+app.get("/", (req, res) => {
+res.send("API ONLINE 🚀");
+});
 
-if (!MONGO_URI) {
-  console.log("❌ MONGO_URI não encontrada");
-  process.exit(1);
+// ==============================
+// SALVAR TOKEN (já deve ter)
+// ==============================
+let tokens = [];
+
+app.post("/save-token", (req, res) => {
+const { token } = req.body;
+
+if (!tokens.includes(token)) {
+tokens.push(token);
 }
 
-mongoose.connect(MONGO_URI)
-  .then(() => console.log("✅ MongoDB conectado"))
-  .catch(err => console.log("❌ Erro MongoDB:", err));
-
-// ============================
-// MODELS
-// ============================
-
-const tokenSchema = new mongoose.Schema({
-  token: String,
+console.log("TOKENS:", tokens);
+res.json({ success: true });
 });
 
-const Token = mongoose.model("Token", tokenSchema);
+// ==============================
+// 🔥 ENVIO DE PUSH (FALTAVA ISSO)
+// ==============================
+app.post("/send", async (req, res) => {
+const { titulo, mensagem } = req.body;
 
-// ============================
-// LOGIN FIXO (SIMPLES)
-// ============================
+if (!titulo || !mensagem) {
+return res.status(400).json({ error: "Dados inválidos" });
+}
 
-const USER = {
-  email: "admin@email.com",
-  password: "123456"
+try {
+const payload = {
+notification: {
+title: titulo,
+body: mensagem
+}
 };
 
-app.post("/login", (req, res) => {
-  const { email, password } = req.body;
+```
+const results = await Promise.all(
+  tokens.map(token =>
+    admin.messaging().send({
+      token,
+      notification: payload.notification
+    })
+  )
+);
 
-  if (email === USER.email && password === USER.password) {
-    const token = jwt.sign({ email }, JWT_SECRET, { expiresIn: "7d" });
+console.log("ENVIOS:", results.length);
 
-    return res.json({ token });
-  }
+res.json({ success: true });
+```
 
-  return res.status(401).json({ error: "Login inválido" });
+} catch (err) {
+console.error(err);
+res.status(500).json({ error: "Erro ao enviar push" });
+}
 });
 
-// ============================
-// SAVE TOKEN
-// ============================
-
-app.post("/save-token", async (req, res) => {
-  try {
-    const { token } = req.body;
-
-    await Token.updateOne(
-      { token },
-      { token },
-      { upsert: true }
-    );
-
-    console.log("✅ Token salvo");
-
-    res.status(200).json({ message: "ok" });
-
-  } catch (error) {
-    console.log("❌ Erro:", error);
-    res.status(500).json({ error: "Erro" });
-  }
-});
-
-// ============================
-// TESTE
-// ============================
-
-app.get("/", (req, res) => {
-  res.send("API ONLINE 🚀");
-});
-
-// ============================
-// SERVER
-// ============================
-
-const PORT = process.env.PORT || 10000;
-
+// ==============================
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Rodando na porta ${PORT}`);
+console.log("Servidor rodando 🚀");
 });
