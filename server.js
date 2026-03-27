@@ -6,14 +6,14 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 🔥 INICIALIZA FIREBASE (caso ainda não esteja)
+// 🔥 INICIALIZA FIREBASE
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.applicationDefault()
   });
 }
 
-// 🔥 CONTADOR DE ESTATÍSTICAS
+// 🔥 CONTADOR
 let totalEnviados = 0;
 
 // 🔥 TOKENS
@@ -21,7 +21,16 @@ let tokens = new Set();
 
 // 🔥 SALVAR TOKEN
 app.post("/save-token", (req, res) => {
-  tokens.add(req.body.token);
+  const { token } = req.body;
+
+  if (!token) {
+    return res.status(400).json({ error: "Token inválido" });
+  }
+
+  tokens.add(token);
+
+  console.log("📱 Token salvo:", token);
+
   res.json({ ok: true });
 });
 
@@ -30,22 +39,32 @@ app.post("/send", async (req, res) => {
   const { title, body } = req.body;
 
   try {
-    await admin.messaging().sendEachForMulticast({
-      tokens: Array.from(tokens),
+
+    const tokenList = Array.from(tokens);
+
+    // 🚨 VALIDAÇÃO CRÍTICA
+    if (tokenList.length === 0) {
+      return res.status(400).json({ error: "Nenhum token registrado" });
+    }
+
+    const response = await admin.messaging().sendEachForMulticast({
+      tokens: tokenList,
       notification: { title, body }
     });
 
-    // 🔥 SOMA NA ESTATÍSTICA
+    console.log("📤 Resultado envio:", response);
+
     totalEnviados++;
 
     res.json({ ok: true });
+
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Erro ao enviar" });
+    console.error("❌ ERRO REAL:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// 🔥 ENVIO AGENDADO (SIMPLES)
+// 🔥 ENVIO AGENDADO
 app.post("/schedule", (req, res) => {
   const { title, body, date } = req.body;
 
@@ -53,33 +72,41 @@ app.post("/schedule", (req, res) => {
 
   setTimeout(async () => {
     try {
+
+      const tokenList = Array.from(tokens);
+
+      if (tokenList.length === 0) {
+        console.log("⚠️ Nenhum token para envio agendado");
+        return;
+      }
+
       await admin.messaging().sendEachForMulticast({
-        tokens: Array.from(tokens),
+        tokens: tokenList,
         notification: { title, body }
       });
 
-      // 🔥 SOMA NA ESTATÍSTICA TAMBÉM
       totalEnviados++;
 
       console.log("⏰ Executado:", title);
+
     } catch (err) {
-      console.error(err);
+      console.error("❌ ERRO AGENDADO:", err);
     }
   }, delay);
 
   res.json({ ok: true });
 });
 
-// 🔥 ROTA DE ESTATÍSTICAS
+// 🔥 ESTATÍSTICAS
 app.get("/stats", (req, res) => {
   res.json({
     total: totalEnviados
   });
 });
 
-// 🔥 PORTA (OBRIGATÓRIO NO RENDER)
+// 🔥 PORTA
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("Servidor rodando na porta " + PORT);
+  console.log("🚀 Servidor rodando na porta " + PORT);
 });
