@@ -1,112 +1,102 @@
-const express = require("express");
-const cors = require("cors");
-const admin = require("firebase-admin");
+import express from "express";
+import mongoose from "mongoose";
+import cors from "cors";
+import jwt from "jsonwebtoken";
 
 const app = express();
+
 app.use(cors());
 app.use(express.json());
 
-// 🔥 INICIALIZA FIREBASE
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.applicationDefault()
-  });
+// ============================
+// CONFIG
+// ============================
+
+const MONGO_URI = process.env.MONGO_URI;
+const JWT_SECRET = "123456"; // pode melhorar depois
+
+// ============================
+// MONGO
+// ============================
+
+if (!MONGO_URI) {
+  console.log("❌ MONGO_URI não encontrada");
+  process.exit(1);
 }
 
-// 🔥 CONTADOR
-let totalEnviados = 0;
+mongoose.connect(MONGO_URI)
+  .then(() => console.log("✅ MongoDB conectado"))
+  .catch(err => console.log("❌ Erro MongoDB:", err));
 
-// 🔥 TOKENS
-let tokens = new Set();
+// ============================
+// MODELS
+// ============================
 
-// 🔥 SALVAR TOKEN
-app.post("/save-token", (req, res) => {
-  const { token } = req.body;
-
-  if (!token) {
-    return res.status(400).json({ error: "Token inválido" });
-  }
-
-  tokens.add(token);
-
-  console.log("📱 Token salvo:", token);
-
-  res.json({ ok: true });
+const tokenSchema = new mongoose.Schema({
+  token: String,
 });
 
-// 🔥 ENVIO DIRETO
-app.post("/send", async (req, res) => {
-  const { title, body } = req.body;
+const Token = mongoose.model("Token", tokenSchema);
 
+// ============================
+// LOGIN FIXO (SIMPLES)
+// ============================
+
+const USER = {
+  email: "admin@email.com",
+  password: "123456"
+};
+
+app.post("/login", (req, res) => {
+  const { email, password } = req.body;
+
+  if (email === USER.email && password === USER.password) {
+    const token = jwt.sign({ email }, JWT_SECRET, { expiresIn: "7d" });
+
+    return res.json({ token });
+  }
+
+  return res.status(401).json({ error: "Login inválido" });
+});
+
+// ============================
+// SAVE TOKEN
+// ============================
+
+app.post("/save-token", async (req, res) => {
   try {
+    const { token } = req.body;
 
-    const tokenList = Array.from(tokens);
+    await Token.updateOne(
+      { token },
+      { token },
+      { upsert: true }
+    );
 
-    // 🚨 VALIDAÇÃO CRÍTICA
-    if (tokenList.length === 0) {
-      return res.status(400).json({ error: "Nenhum token registrado" });
-    }
+    console.log("✅ Token salvo");
 
-    const response = await admin.messaging().sendEachForMulticast({
-      tokens: tokenList,
-      notification: { title, body }
-    });
+    res.status(200).json({ message: "ok" });
 
-    console.log("📤 Resultado envio:", response);
-
-    totalEnviados++;
-
-    res.json({ ok: true });
-
-  } catch (err) {
-    console.error("❌ ERRO REAL:", err);
-    res.status(500).json({ error: err.message });
+  } catch (error) {
+    console.log("❌ Erro:", error);
+    res.status(500).json({ error: "Erro" });
   }
 });
 
-// 🔥 ENVIO AGENDADO
-app.post("/schedule", (req, res) => {
-  const { title, body, date } = req.body;
+// ============================
+// TESTE
+// ============================
 
-  const delay = new Date(date).getTime() - Date.now();
-
-  setTimeout(async () => {
-    try {
-
-      const tokenList = Array.from(tokens);
-
-      if (tokenList.length === 0) {
-        console.log("⚠️ Nenhum token para envio agendado");
-        return;
-      }
-
-      await admin.messaging().sendEachForMulticast({
-        tokens: tokenList,
-        notification: { title, body }
-      });
-
-      totalEnviados++;
-
-      console.log("⏰ Executado:", title);
-
-    } catch (err) {
-      console.error("❌ ERRO AGENDADO:", err);
-    }
-  }, delay);
-
-  res.json({ ok: true });
+app.get("/", (req, res) => {
+  res.send("API ONLINE 🚀");
 });
 
-// 🔥 ESTATÍSTICAS
-app.get("/stats", (req, res) => {
-  res.json({
-    total: totalEnviados
-  });
-});
+// ============================
+// SERVER
+// ============================
 
-// 🔥 PORTA
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 
 app.listen(PORT, () => {
-  console.log("🚀 Servidor rodando na porta " + PORT);
+  console.log(`🚀 Rodando na porta ${PORT}`);
 });
