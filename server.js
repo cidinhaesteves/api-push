@@ -1,18 +1,15 @@
 import express from "express";
 import cors from "cors";
 import admin from "firebase-admin";
-import fs from "fs";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 // ==============================
-// 🔥 FIREBASE ADMIN (CORRIGIDO)
+// 🔥 FIREBASE VIA ENV (CORRIGIDO)
 // ==============================
-const serviceAccount = JSON.parse(
-fs.readFileSync("./serviceAccountKey.json", "utf-8")
-);
+const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
 
 admin.initializeApp({
 credential: admin.credential.cert(serviceAccount)
@@ -42,7 +39,7 @@ res.json({ success: true });
 });
 
 // ==============================
-// 🔥 ENVIO DE PUSH (FUNCIONANDO)
+// 🔥 ENVIO DE PUSH
 // ==============================
 app.post("/send", async (req, res) => {
 const { titulo, mensagem } = req.body;
