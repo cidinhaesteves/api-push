@@ -6,7 +6,14 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 🔥 CONTADOR EM MEMÓRIA
+// 🔥 INICIALIZA FIREBASE (caso ainda não esteja)
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.applicationDefault()
+  });
+}
+
+// 🔥 CONTADOR DE ESTATÍSTICAS
 let totalEnviados = 0;
 
 // 🔥 TOKENS
@@ -18,7 +25,7 @@ app.post("/save-token", (req, res) => {
   res.json({ ok: true });
 });
 
-// 🔥 ENVIAR PUSH
+// 🔥 ENVIO DIRETO
 app.post("/send", async (req, res) => {
   const { title, body } = req.body;
 
@@ -28,7 +35,7 @@ app.post("/send", async (req, res) => {
       notification: { title, body }
     });
 
-    // 🔥 INCREMENTA CONTADOR
+    // 🔥 SOMA NA ESTATÍSTICA
     totalEnviados++;
 
     res.json({ ok: true });
@@ -38,14 +45,41 @@ app.post("/send", async (req, res) => {
   }
 });
 
-// 🔥 ROTA DE ESTATÍSTICAS (AQUI ESTAVA FALTANDO)
+// 🔥 ENVIO AGENDADO (SIMPLES)
+app.post("/schedule", (req, res) => {
+  const { title, body, date } = req.body;
+
+  const delay = new Date(date).getTime() - Date.now();
+
+  setTimeout(async () => {
+    try {
+      await admin.messaging().sendEachForMulticast({
+        tokens: Array.from(tokens),
+        notification: { title, body }
+      });
+
+      // 🔥 SOMA NA ESTATÍSTICA TAMBÉM
+      totalEnviados++;
+
+      console.log("⏰ Executado:", title);
+    } catch (err) {
+      console.error(err);
+    }
+  }, delay);
+
+  res.json({ ok: true });
+});
+
+// 🔥 ROTA DE ESTATÍSTICAS
 app.get("/stats", (req, res) => {
   res.json({
     total: totalEnviados
   });
 });
 
-// 🔥 START
-app.listen(3000, () => {
-  console.log("Servidor rodando...");
+// 🔥 PORTA (OBRIGATÓRIO NO RENDER)
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log("Servidor rodando na porta " + PORT);
 });
