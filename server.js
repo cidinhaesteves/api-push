@@ -7,8 +7,9 @@ app.use(cors());
 app.use(express.json());
 
 // ==============================
-// 🔥 FIREBASE VIA ENV (CORRIGIDO)
+// 🔥 FIREBASE VIA ENV (CORRETO)
 // ==============================
+
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
 
 admin.initializeApp({
@@ -18,13 +19,15 @@ credential: admin.credential.cert(serviceAccount)
 // ==============================
 // TESTE
 // ==============================
+
 app.get("/", (req, res) => {
 res.send("API ONLINE 🚀");
 });
 
 // ==============================
-// SALVAR TOKEN
+// TOKENS
 // ==============================
+
 let tokens = [];
 
 app.post("/save-token", (req, res) => {
@@ -35,17 +38,23 @@ tokens.push(token);
 }
 
 console.log("TOKENS:", tokens);
+
 res.json({ success: true });
 });
 
 // ==============================
-// 🔥 ENVIO DE PUSH
+// 🚀 ENVIO PUSH
 // ==============================
+
 app.post("/send", async (req, res) => {
 const { titulo, mensagem } = req.body;
 
 if (!titulo || !mensagem) {
 return res.status(400).json({ error: "Dados inválidos" });
+}
+
+if (tokens.length === 0) {
+return res.status(400).json({ error: "Nenhum token registrado" });
 }
 
 try {
@@ -74,6 +83,7 @@ res.status(500).json({ error: "Erro ao enviar push" });
 });
 
 // ==============================
+
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
