@@ -6,25 +6,16 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ==============================
-// 🔥 FIREBASE ADMIN
-// ==============================
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });
 
-// ==============================
-// TESTE
-// ==============================
 app.get("/", (req, res) => {
   res.send("API ONLINE 🚀");
 });
 
-// ==============================
-// 🔐 LOGIN
-// ==============================
 app.post("/login", (req, res) => {
   const { email, senha } = req.body;
 
@@ -35,14 +26,8 @@ app.post("/login", (req, res) => {
   return res.status(401).json({ error: "Credenciais inválidas" });
 });
 
-// ==============================
-// MEMÓRIA DE TOKENS
-// ==============================
 let tokens = [];
 
-// ==============================
-// SALVAR TOKEN
-// ==============================
 app.post("/save-token", (req, res) => {
   const { token } = req.body;
 
@@ -54,9 +39,7 @@ app.post("/save-token", (req, res) => {
   res.json({ success: true });
 });
 
-// ==============================
-// ENVIAR PUSH (CORRIGIDO)
-// ==============================
+// 🚀 ENVIO FINAL CORRETO
 app.post("/send", async (req, res) => {
   const { titulo, mensagem } = req.body;
 
@@ -70,12 +53,19 @@ app.post("/send", async (req, res) => {
 
   let sucesso = 0;
   let falha = 0;
-  let tokensValidos = [];
 
   for (const token of tokens) {
     try {
       await admin.messaging().send({
         token,
+
+        // 🔥 ESSENCIAL
+        notification: {
+          title: titulo,
+          body: mensagem
+        },
+
+        // 🔥 opcional (mantém compatibilidade)
         data: {
           title: titulo,
           body: mensagem
@@ -83,28 +73,19 @@ app.post("/send", async (req, res) => {
       });
 
       sucesso++;
-      tokensValidos.push(token);
 
     } catch (err) {
-      console.error("❌ ERRO TOKEN:", token, err.message);
+      console.error("ERRO TOKEN:", err.message);
       falha++;
     }
   }
 
-  // 🔥 limpa tokens inválidos automaticamente
-  tokens = tokensValidos;
+  console.log("SUCESSO:", sucesso);
+  console.log("FALHA:", falha);
 
-  console.log("✅ SUCESSO:", sucesso);
-  console.log("❌ FALHA:", falha);
-
-  return res.json({
-    success: true,
-    enviados: sucesso,
-    falharam: falha
-  });
+  res.json({ success: true });
 });
 
-// ==============================
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
