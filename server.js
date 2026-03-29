@@ -28,8 +28,6 @@ app.get("/", (req, res) => {
 app.post("/login", (req, res) => {
   const { email, senha } = req.body;
 
-  console.log("LOGIN:", email, senha);
-
   if (email === "admin@email.com" && senha === "123456") {
     return res.json({ success: true });
   }
@@ -53,12 +51,11 @@ app.post("/save-token", (req, res) => {
   }
 
   console.log("TOKENS:", tokens);
-
   res.json({ success: true });
 });
 
 // ==============================
-// 🚀 ENVIAR PUSH (CORRIGIDO)
+// ENVIAR PUSH (CORRIGIDO)
 // ==============================
 app.post("/send", async (req, res) => {
   const { titulo, mensagem } = req.body;
@@ -71,27 +68,40 @@ app.post("/send", async (req, res) => {
     return res.status(400).json({ error: "Nenhum token registrado" });
   }
 
-  try {
-    const results = await Promise.all(
-      tokens.map(token =>
-        admin.messaging().send({
-          token,
-          data: {
-            title: titulo,
-            body: mensagem
-          }
-        })
-      )
-    );
+  let sucesso = 0;
+  let falha = 0;
+  let tokensValidos = [];
 
-    console.log("ENVIOS:", results.length);
+  for (const token of tokens) {
+    try {
+      await admin.messaging().send({
+        token,
+        data: {
+          title: titulo,
+          body: mensagem
+        }
+      });
 
-    res.json({ success: true });
+      sucesso++;
+      tokensValidos.push(token);
 
-  } catch (err) {
-    console.error("🔥 ERRO ENVIO:", err);
-    res.status(500).json({ error: "Erro ao enviar push" });
+    } catch (err) {
+      console.error("❌ ERRO TOKEN:", token, err.message);
+      falha++;
+    }
   }
+
+  // 🔥 limpa tokens inválidos automaticamente
+  tokens = tokensValidos;
+
+  console.log("✅ SUCESSO:", sucesso);
+  console.log("❌ FALHA:", falha);
+
+  return res.json({
+    success: true,
+    enviados: sucesso,
+    falharam: falha
+  });
 });
 
 // ==============================
