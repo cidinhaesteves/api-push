@@ -23,12 +23,12 @@ app.get("/", (req, res) => {
 });
 
 // ==============================
-// 🔐 LOGIN SIMPLES (CORRIGIDO)
+// 🔐 LOGIN
 // ==============================
 app.post("/login", (req, res) => {
   const { email, senha } = req.body;
 
-  console.log("LOGIN RECEBIDO:", email, senha);
+  console.log("LOGIN:", email, senha);
 
   if (email === "admin@email.com" && senha === "123456") {
     return res.json({ success: true });
@@ -53,11 +53,12 @@ app.post("/save-token", (req, res) => {
   }
 
   console.log("TOKENS:", tokens);
+
   res.json({ success: true });
 });
 
 // ==============================
-// ENVIAR PUSH
+// 🚀 ENVIAR PUSH (CORRIGIDO)
 // ==============================
 app.post("/send", async (req, res) => {
   const { titulo, mensagem } = req.body;
@@ -75,7 +76,7 @@ app.post("/send", async (req, res) => {
       tokens.map(token =>
         admin.messaging().send({
           token,
-          notification: {
+          data: {
             title: titulo,
             body: mensagem
           }
