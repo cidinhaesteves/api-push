@@ -12,27 +12,29 @@ app.use(express.json());
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
 
 admin.initializeApp({
-credential: admin.credential.cert(serviceAccount)
+  credential: admin.credential.cert(serviceAccount)
 });
 
 // ==============================
 // TESTE
 // ==============================
 app.get("/", (req, res) => {
-res.send("API ONLINE 🚀");
+  res.send("API ONLINE 🚀");
 });
 
 // ==============================
-// 🔐 LOGIN SIMPLES
+// 🔐 LOGIN SIMPLES (CORRIGIDO)
 // ==============================
 app.post("/login", (req, res) => {
-const { email, senha } = req.body;
+  const { email, senha } = req.body;
 
-if (email === "[admin@email.com](mailto:admin@email.com)" && senha === "123456") {
-return res.json({ success: true });
-}
+  console.log("LOGIN RECEBIDO:", email, senha);
 
-return res.status(401).json({ error: "Credenciais inválidas" });
+  if (email === "admin@email.com" && senha === "123456") {
+    return res.json({ success: true });
+  }
+
+  return res.status(401).json({ error: "Credenciais inválidas" });
 });
 
 // ==============================
@@ -44,58 +46,56 @@ let tokens = [];
 // SALVAR TOKEN
 // ==============================
 app.post("/save-token", (req, res) => {
-const { token } = req.body;
+  const { token } = req.body;
 
-if (!tokens.includes(token)) {
-tokens.push(token);
-}
+  if (!tokens.includes(token)) {
+    tokens.push(token);
+  }
 
-console.log("TOKENS:", tokens);
-res.json({ success: true });
+  console.log("TOKENS:", tokens);
+  res.json({ success: true });
 });
 
 // ==============================
 // ENVIAR PUSH
 // ==============================
 app.post("/send", async (req, res) => {
-const { titulo, mensagem } = req.body;
+  const { titulo, mensagem } = req.body;
 
-if (!titulo || !mensagem) {
-return res.status(400).json({ error: "Dados inválidos" });
-}
+  if (!titulo || !mensagem) {
+    return res.status(400).json({ error: "Dados inválidos" });
+  }
 
-if (tokens.length === 0) {
-return res.status(400).json({ error: "Nenhum token registrado" });
-}
+  if (tokens.length === 0) {
+    return res.status(400).json({ error: "Nenhum token registrado" });
+  }
 
-try {
-const results = await Promise.all(
-tokens.map(token =>
-admin.messaging().send({
-token,
-notification: {
-title: titulo,
-body: mensagem
-}
-})
-)
-);
+  try {
+    const results = await Promise.all(
+      tokens.map(token =>
+        admin.messaging().send({
+          token,
+          notification: {
+            title: titulo,
+            body: mensagem
+          }
+        })
+      )
+    );
 
-```
-console.log("ENVIOS:", results.length);
+    console.log("ENVIOS:", results.length);
 
-res.json({ success: true });
-```
+    res.json({ success: true });
 
-} catch (err) {
-console.error("🔥 ERRO ENVIO:", err);
-res.status(500).json({ error: "Erro ao enviar push" });
-}
+  } catch (err) {
+    console.error("🔥 ERRO ENVIO:", err);
+    res.status(500).json({ error: "Erro ao enviar push" });
+  }
 });
 
 // ==============================
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-console.log("Servidor rodando 🚀");
+  console.log("Servidor rodando 🚀");
 });
