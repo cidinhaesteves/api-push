@@ -7,7 +7,7 @@ app.use(cors());
 app.use(express.json());
 
 // ==============================
-// 🔥 FIREBASE ADMIN VIA ENV
+// 🔥 FIREBASE ADMIN
 // ==============================
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
 
@@ -20,6 +20,19 @@ credential: admin.credential.cert(serviceAccount)
 // ==============================
 app.get("/", (req, res) => {
 res.send("API ONLINE 🚀");
+});
+
+// ==============================
+// 🔐 LOGIN SIMPLES
+// ==============================
+app.post("/login", (req, res) => {
+const { email, senha } = req.body;
+
+if (email === "[admin@email.com](mailto:admin@email.com)" && senha === "123456") {
+return res.json({ success: true });
+}
+
+return res.status(401).json({ error: "Credenciais inválidas" });
 });
 
 // ==============================
@@ -75,7 +88,7 @@ res.json({ success: true });
 ```
 
 } catch (err) {
-console.error("🔥 ERRO ENVIO REAL:", err);
+console.error("🔥 ERRO ENVIO:", err);
 res.status(500).json({ error: "Erro ao enviar push" });
 }
 });
