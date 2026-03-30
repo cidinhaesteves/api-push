@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import admin from "firebase-admin";
+import cron from "node-cron";
 
 const app = express();
 app.use(cors());
@@ -28,6 +29,9 @@ app.post("/login", (req, res) => {
 
 let tokens = [];
 
+// ==========================
+// SALVAR TOKEN
+// ==========================
 app.post("/save-token", (req, res) => {
   const { token } = req.body;
 
@@ -35,55 +39,89 @@ app.post("/save-token", (req, res) => {
     tokens.push(token);
   }
 
-  console.log("TOKENS:", tokens);
   res.json({ success: true });
 });
 
-// 🚀 ENVIO FINAL CORRETO
-app.post("/send", async (req, res) => {
-  const { titulo, mensagem } = req.body;
-
-  if (!titulo || !mensagem) {
-    return res.status(400).json({ error: "Dados inválidos" });
-  }
-
-  if (tokens.length === 0) {
-    return res.status(400).json({ error: "Nenhum token registrado" });
-  }
-
-  let sucesso = 0;
-  let falha = 0;
-
-  for (const token of tokens) {
-    try {
-      await admin.messaging().send({
+// ==========================
+// ENVIAR PUSH IMEDIATO
+// ==========================
+async function enviarPushParaTodos(titulo, mensagem) {
+  await Promise.all(
+    tokens.map(token =>
+      admin.messaging().send({
         token,
-
-        // 🔥 ESSENCIAL
-        notification: {
-          title: titulo,
-          body: mensagem
-        },
-
-        // 🔥 opcional (mantém compatibilidade)
         data: {
           title: titulo,
           body: mensagem
         }
-      });
+      })
+    )
+  );
+}
 
-      sucesso++;
+app.post("/send", async (req, res) => {
+  const { titulo, mensagem } = req.body;
 
-    } catch (err) {
-      console.error("ERRO TOKEN:", err.message);
-      falha++;
-    }
+  try {
+    await enviarPushParaTodos(titulo, mensagem);
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Erro ao enviar push" });
+  }
+});
+
+// ==========================
+// AGENDAMENTO DE PUSH
+// ==========================
+let agendamentos = [];
+
+app.post("/schedule", (req, res) => {
+  const { titulo, mensagem, data } = req.body;
+
+  const dataEnvio = new Date(data);
+  const agora = new Date();
+
+  if (dataEnvio <= agora) {
+    return res.status(400).json({ error: "Data deve ser futura" });
   }
 
-  console.log("SUCESSO:", sucesso);
-  console.log("FALHA:", falha);
+  // Converter para cron
+  const minuto = dataEnvio.getMinutes();
+  const hora = dataEnvio.getHours();
+  const dia = dataEnvio.getDate();
+  const mes = dataEnvio.getMonth() + 1;
 
-  res.json({ success: true });
+  const cronExp = `${minuto} ${hora} ${dia} ${mes} *`;
+
+  const job = cron.schedule(cronExp, async () => {
+    console.log("⏰ Enviando push agendado...");
+
+    try {
+      await enviarPushParaTodos(titulo, mensagem);
+      console.log("✅ Push agendado enviado");
+
+      job.stop();
+    } catch (err) {
+      console.error("❌ Erro no agendamento:", err);
+    }
+  });
+
+  agendamentos.push({
+    titulo,
+    mensagem,
+    data,
+    cronExp
+  });
+
+  res.json({ success: true, agendado: cronExp });
+});
+
+// ==========================
+// LISTAR AGENDAMENTOS
+// ==========================
+app.get("/schedules", (req, res) => {
+  res.json(agendamentos);
 });
 
 const PORT = process.env.PORT || 3000;
