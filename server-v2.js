@@ -1,22 +1,25 @@
 import express from "express";
 import cors from "cors";
 import admin from "firebase-admin";
+import fs from "fs";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 /**
- * 🔥 INICIALIZA FIREBASE ADMIN
+ * 🔥 CARREGAR SERVICE ACCOUNT (FORMA COMPATÍVEL)
  */
-import serviceAccount from "./serviceAccountKey.json" assert { type: "json" };
+const serviceAccount = JSON.parse(
+  fs.readFileSync("./serviceAccountKey.json", "utf-8")
+);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
 
 /**
- * 🧠 MEMÓRIA DE TOKENS (simples por enquanto)
+ * 🧠 MEMÓRIA DE TOKENS
  */
 let tokens = [];
 
@@ -67,7 +70,6 @@ async function enviarPushParaTodos(titulo, mensagem) {
       } catch (error) {
         console.error("❌ Erro ao enviar para token:", token);
 
-        // 🔥 REMOVE TOKEN INVÁLIDO
         if (
           error.code === "messaging/registration-token-not-registered" ||
           error.code === "messaging/invalid-registration-token"
@@ -79,7 +81,6 @@ async function enviarPushParaTodos(titulo, mensagem) {
     })
   );
 
-  // 🧹 LIMPAR TOKENS INVÁLIDOS
   if (tokensInvalidos.length > 0) {
     tokens = tokens.filter((t) => !tokensInvalidos.includes(t));
     console.log("🧹 Tokens inválidos removidos com sucesso");
