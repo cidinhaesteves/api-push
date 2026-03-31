@@ -1,169 +1,110 @@
 import express from "express";
 import cors from "cors";
 import admin from "firebase-admin";
-import cron from "node-cron";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ==========================
-// FIREBASE INIT (COM PROTEÇÃO)
-// ==========================
-if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
-  console.error("❌ FIREBASE_SERVICE_ACCOUNT não definida");
-  process.exit(1);
-}
-
-let serviceAccount;
-
-try {
-  serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-  console.log("✅ Firebase JSON OK");
-} catch (err) {
-  console.error("❌ Erro ao fazer parse do Firebase JSON", err);
-  process.exit(1);
-}
+/**
+ * 🔥 INICIALIZA FIREBASE ADMIN
+ */
+import serviceAccount from "./serviceAccountKey.json" assert { type: "json" };
 
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
+  credential: admin.credential.cert(serviceAccount),
 });
 
-// ==========================
-// ROTAS BÁSICAS
-// ==========================
-app.get("/", (req, res) => {
-  res.send("API ONLINE 🚀");
-});
-
-app.post("/login", (req, res) => {
-  const { email, senha } = req.body;
-
-  if (email === "admin@email.com" && senha === "123456") {
-    return res.json({ success: true });
-  }
-
-  return res.status(401).json({ error: "Credenciais inválidas" });
-});
-
-// ==========================
-// TOKENS EM MEMÓRIA
-// ==========================
+/**
+ * 🧠 MEMÓRIA DE TOKENS (simples por enquanto)
+ */
 let tokens = [];
 
-// ==========================
-// SALVAR TOKEN
-// ==========================
+/**
+ * 📌 SALVAR TOKEN
+ */
 app.post("/save-token", (req, res) => {
   const { token } = req.body;
 
-  if (!tokens.includes(token)) {
-    tokens.push(token);
+  if (!token) {
+    return res.status(400).json({ error: "Token não enviado" });
   }
 
-  console.log("📱 Token salvo:", token);
+  if (!tokens.includes(token)) {
+    tokens.push(token);
+    console.log("📱 Token salvo:", token);
+  }
+
   res.json({ success: true });
 });
 
-// ==========================
-// ENVIO DE PUSH (CORRIGIDO)
-// ==========================
+/**
+ * 🚀 ENVIAR PUSH PARA TODOS
+ */
 async function enviarPushParaTodos(titulo, mensagem) {
   if (tokens.length === 0) {
     throw new Error("Nenhum token cadastrado");
   }
 
+  const tokensInvalidos = [];
+
   await Promise.all(
-    tokens.map(token =>
-      admin.messaging().send({
-        token,
-        notification: {
-          title: titulo,
-          body: mensagem
-        },
-        webpush: {
+    tokens.map(async (token) => {
+      try {
+        await admin.messaging().send({
+          token,
           notification: {
             title: titulo,
             body: mensagem,
-            icon: "https://cdn-icons-png.flaticon.com/512/1827/1827392.png"
-          }
+          },
+          webpush: {
+            notification: {
+              title: titulo,
+              body: mensagem,
+            },
+          },
+        });
+      } catch (error) {
+        console.error("❌ Erro ao enviar para token:", token);
+
+        // 🔥 REMOVE TOKEN INVÁLIDO
+        if (
+          error.code === "messaging/registration-token-not-registered" ||
+          error.code === "messaging/invalid-registration-token"
+        ) {
+          console.log("🧹 Removendo token inválido:", token);
+          tokensInvalidos.push(token);
         }
-      })
-    )
+      }
+    })
   );
+
+  // 🧹 LIMPAR TOKENS INVÁLIDOS
+  if (tokensInvalidos.length > 0) {
+    tokens = tokens.filter((t) => !tokensInvalidos.includes(t));
+    console.log("🧹 Tokens inválidos removidos com sucesso");
+  }
 }
 
-// ==========================
-// ENVIAR PUSH IMEDIATO
-// ==========================
+/**
+ * 📡 ROTA DE ENVIO
+ */
 app.post("/send", async (req, res) => {
   const { titulo, mensagem } = req.body;
 
   try {
     await enviarPushParaTodos(titulo, mensagem);
     res.json({ success: true });
-  } catch (err) {
-    console.error("❌ Erro ao enviar push:", err);
-    res.status(500).json({ error: err.message });
+  } catch (error) {
+    console.error("❌ Erro ao enviar push:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// ==========================
-// AGENDAMENTO DE PUSH
-// ==========================
-let agendamentos = [];
-
-app.post("/schedule", (req, res) => {
-  const { titulo, mensagem, data } = req.body;
-
-  const dataEnvio = new Date(data);
-  const agora = new Date();
-
-  if (dataEnvio <= agora) {
-    return res.status(400).json({ error: "Data deve ser futura" });
-  }
-
-  const minuto = dataEnvio.getMinutes();
-  const hora = dataEnvio.getHours();
-  const dia = dataEnvio.getDate();
-  const mes = dataEnvio.getMonth() + 1;
-
-  const cronExp = `${minuto} ${hora} ${dia} ${mes} *`;
-
-  const job = cron.schedule(cronExp, async () => {
-    console.log("⏰ Enviando push agendado...");
-
-    try {
-      await enviarPushParaTodos(titulo, mensagem);
-      console.log("✅ Push agendado enviado");
-      job.stop();
-    } catch (err) {
-      console.error("❌ Erro no agendamento:", err);
-    }
-  });
-
-  agendamentos.push({
-    titulo,
-    mensagem,
-    data,
-    cronExp
-  });
-
-  res.json({ success: true, agendado: cronExp });
-});
-
-// ==========================
-// LISTAR AGENDAMENTOS
-// ==========================
-app.get("/schedules", (req, res) => {
-  res.json(agendamentos);
-});
-
-// ==========================
-// START SERVER
-// ==========================
-const PORT = process.env.PORT || 3000;
-
+/**
+ * 🚀 START SERVER
+ */
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log("🚀 Servidor rodando");
+  console.log(`🚀 Servidor rodando na porta ${PORT}`);
 });
