@@ -1,18 +1,15 @@
 import express from "express";
 import cors from "cors";
 import admin from "firebase-admin";
-import fs from "fs";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 /**
- * 🔥 CARREGAR SERVICE ACCOUNT (FORMA COMPATÍVEL)
+ * 🔥 SERVICE ACCOUNT VIA ENV (SEM ARQUIVO)
  */
-const serviceAccount = JSON.parse(
-  fs.readFileSync("./serviceAccountKey.json", "utf-8")
-);
+const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -42,7 +39,7 @@ app.post("/save-token", (req, res) => {
 });
 
 /**
- * 🚀 ENVIAR PUSH PARA TODOS
+ * 🚀 ENVIAR PUSH PARA TODOS + LIMPEZA AUTOMÁTICA
  */
 async function enviarPushParaTodos(titulo, mensagem) {
   if (tokens.length === 0) {
@@ -68,22 +65,23 @@ async function enviarPushParaTodos(titulo, mensagem) {
           },
         });
       } catch (error) {
-        console.error("❌ Erro ao enviar para token:", token);
+        console.error("❌ Erro ao enviar:", token);
 
         if (
           error.code === "messaging/registration-token-not-registered" ||
           error.code === "messaging/invalid-registration-token"
         ) {
-          console.log("🧹 Removendo token inválido:", token);
+          console.log("🧹 Removendo inválido:", token);
           tokensInvalidos.push(token);
         }
       }
     })
   );
 
+  // 🔥 LIMPEZA REAL
   if (tokensInvalidos.length > 0) {
     tokens = tokens.filter((t) => !tokensInvalidos.includes(t));
-    console.log("🧹 Tokens inválidos removidos com sucesso");
+    console.log("🧹 Tokens limpos:", tokensInvalidos.length);
   }
 }
 
@@ -97,15 +95,15 @@ app.post("/send", async (req, res) => {
     await enviarPushParaTodos(titulo, mensagem);
     res.json({ success: true });
   } catch (error) {
-    console.error("❌ Erro ao enviar push:", error);
+    console.error("❌ Erro geral:", error);
     res.status(500).json({ error: error.message });
   }
 });
 
 /**
- * 🚀 START SERVER
+ * 🚀 START
  */
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor rodando na porta ${PORT}`);
+  console.log(`🚀 Rodando na porta ${PORT}`);
 });
