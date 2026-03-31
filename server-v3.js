@@ -2,8 +2,12 @@ import express from "express";
 import bodyParser from "body-parser";
 import admin from "firebase-admin";
 import mongoose from "mongoose";
+import cors from "cors";
 
 const app = express();
+
+// 🔥 CORS LIBERADO
+app.use(cors());
 app.use(bodyParser.json());
 
 // 🔐 FIREBASE
@@ -26,7 +30,7 @@ const tokenSchema = new mongoose.Schema({
 
 const Token = mongoose.model("Token", tokenSchema);
 
-// 🧠 FALLBACK EM MEMÓRIA (mantém compatibilidade)
+// 🧠 FALLBACK EM MEMÓRIA
 let tokens = [];
 
 // 📥 SALVAR TOKEN
@@ -37,12 +41,10 @@ app.post("/save-token", async (req, res) => {
     return res.status(400).json({ error: "Token inválido" });
   }
 
-  // memória (continua funcionando como antes)
   if (!tokens.includes(token)) {
     tokens.push(token);
   }
 
-  // banco (novo)
   try {
     await Token.updateOne(
       { token },
@@ -68,7 +70,6 @@ app.post("/send", async (req, res) => {
       throw new Error("Título e mensagem são obrigatórios");
     }
 
-    // 🔥 BUSCAR TOKENS DO BANCO
     let dbTokens = [];
 
     try {
@@ -78,7 +79,6 @@ app.post("/send", async (req, res) => {
       console.log("⚠️ Erro ao buscar tokens do Mongo");
     }
 
-    // fallback: se banco falhar, usa memória
     const allTokens = dbTokens.length > 0 ? dbTokens : tokens;
 
     if (allTokens.length === 0) {
@@ -102,7 +102,6 @@ app.post("/send", async (req, res) => {
       }
     }
 
-    // 🧹 LIMPEZA NO BANCO
     if (tokensInvalidos.length > 0) {
       try {
         await Token.deleteMany({ token: { $in: tokensInvalidos } });
@@ -112,10 +111,7 @@ app.post("/send", async (req, res) => {
       }
     }
 
-    // 🧹 LIMPEZA NA MEMÓRIA
     tokens = tokens.filter(t => !tokensInvalidos.includes(t));
-
-    console.log("📊 Tokens ativos:", allTokens.length);
 
     res.json({
       success: true,
