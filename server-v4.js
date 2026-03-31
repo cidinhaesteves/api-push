@@ -40,21 +40,19 @@ const userSchema = new mongoose.Schema({
 });
 const User = mongoose.model("User", userSchema);
 
-// 🧠 GROUPS (NOVO)
+// 🧠 GROUPS
 const groupSchema = new mongoose.Schema({
   name: { type: String, unique: true },
-  users: [String], // lista de userId
+  users: [String],
   createdAt: { type: Date, default: Date.now }
 });
 const Group = mongoose.model("Group", groupSchema);
 
 // =============================
-// 🧠 FALLBACK MEMÓRIA
-// =============================
 let tokens = [];
 
 // =============================
-// 📥 SAVE TOKEN (ANTIGO)
+// 📥 SAVE TOKEN
 // =============================
 app.post("/save-token", async (req, res) => {
   const { token } = req.body;
@@ -75,7 +73,7 @@ app.post("/save-token", async (req, res) => {
 });
 
 // =============================
-// 🚀 SEND GLOBAL (ANTIGO)
+// 🚀 SEND GLOBAL
 // =============================
 app.post("/send", async (req, res) => {
   const { titulo, mensagem } = req.body;
@@ -178,7 +176,34 @@ app.post("/send-to-user", async (req, res) => {
 });
 
 // =============================
-// 🚀 START
+// 🆕 CREATE GROUP
+// =============================
+app.post("/create-group", async (req, res) => {
+  const { name } = req.body;
+
+  if (!name) {
+    return res.status(400).json({ error: "Nome do grupo obrigatório" });
+  }
+
+  try {
+    const exists = await Group.findOne({ name });
+
+    if (exists) {
+      return res.status(400).json({ error: "Grupo já existe" });
+    }
+
+    await Group.create({
+      name,
+      users: [],
+    });
+
+    res.json({ success: true });
+
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // =============================
 app.listen(10000, () => {
   console.log("🚀 server-v4 rodando");
