@@ -25,22 +25,28 @@ mongoose.connect(process.env.MONGO_URI)
 // 📦 MODELS
 // =============================
 
-// 🔔 TOKENS (já existente)
+// 🔔 TOKENS
 const tokenSchema = new mongoose.Schema({
   token: { type: String, unique: true },
   createdAt: { type: Date, default: Date.now }
 });
-
 const Token = mongoose.model("Token", tokenSchema);
 
-// 👤 USERS (novo)
+// 👤 USERS
 const userSchema = new mongoose.Schema({
   userId: { type: String, unique: true },
   tokens: [String],
   createdAt: { type: Date, default: Date.now }
 });
-
 const User = mongoose.model("User", userSchema);
+
+// 🧠 GROUPS (NOVO)
+const groupSchema = new mongoose.Schema({
+  name: { type: String, unique: true },
+  users: [String], // lista de userId
+  createdAt: { type: Date, default: Date.now }
+});
+const Group = mongoose.model("Group", groupSchema);
 
 // =============================
 // 🧠 FALLBACK MEMÓRIA
@@ -48,7 +54,7 @@ const User = mongoose.model("User", userSchema);
 let tokens = [];
 
 // =============================
-// 📥 ENDPOINT ANTIGO (mantido)
+// 📥 SAVE TOKEN (ANTIGO)
 // =============================
 app.post("/save-token", async (req, res) => {
   const { token } = req.body;
@@ -69,7 +75,7 @@ app.post("/save-token", async (req, res) => {
 });
 
 // =============================
-// 🚀 ENDPOINT ANTIGO (mantido)
+// 🚀 SEND GLOBAL (ANTIGO)
 // =============================
 app.post("/send", async (req, res) => {
   const { titulo, mensagem } = req.body;
@@ -101,7 +107,7 @@ app.post("/send", async (req, res) => {
 });
 
 // =============================
-// 🆕 VINCULAR USUÁRIO + TOKEN
+// 👤 REGISTER USER
 // =============================
 app.post("/register-user", async (req, res) => {
   const { userId, token } = req.body;
@@ -133,7 +139,7 @@ app.post("/register-user", async (req, res) => {
 });
 
 // =============================
-// 🆕 ENVIAR PARA USUÁRIO
+// 🚀 SEND TO USER
 // =============================
 app.post("/send-to-user", async (req, res) => {
   const { userId, titulo, mensagem } = req.body;
@@ -158,7 +164,6 @@ app.post("/send-to-user", async (req, res) => {
       }
     }
 
-    // limpeza
     user.tokens = user.tokens.filter(t => !tokensInvalidos.includes(t));
     await user.save();
 
@@ -172,6 +177,8 @@ app.post("/send-to-user", async (req, res) => {
   }
 });
 
+// =============================
+// 🚀 START
 // =============================
 app.listen(10000, () => {
   console.log("🚀 server-v4 rodando");
