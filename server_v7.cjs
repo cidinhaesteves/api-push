@@ -1,53 +1,53 @@
 const express = require("express");
-const mongoose = require("mongoose");
 const cors = require("cors");
+const mongoose = require("mongoose");
 const admin = require("firebase-admin");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 
 const app = express();
-app.use(express.json());
 app.use(cors());
+app.use(express.json());
 
-// =======================
-// 🔥 FIREBASE ADMIN
-// =======================
+/* =========================
+   🔥 FIREBASE ADMIN
+========================= */
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
 
-// =======================
-// 🔥 MONGODB
-// =======================
+/* =========================
+   💾 MONGODB
+========================= */
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log("MongoDB conectado"))
   .catch(err => console.log(err));
 
-// =======================
-// 📦 MODELS
-// =======================
-const TokenSchema = new mongoose.Schema({
-  token: String,
-  userId: String,
-  group: String
-});
+/* =========================
+   📦 MODELS
+========================= */
 
-const Token = mongoose.model("Token", TokenSchema);
-
+// USERS
 const UserSchema = new mongoose.Schema({
   nome: String,
-  email: { type: String, unique: true },
+  email: String,
   senha: String,
-  createdAt: { type: Date, default: Date.now }
 });
 
 const User = mongoose.model("User", UserSchema);
 
-// =======================
-// 🔐 MIDDLEWARE AUTH
-// =======================
+// TOKENS
+const TokenSchema = new mongoose.Schema({
+  token: String,
+});
+
+const Token = mongoose.model("Token", TokenSchema);
+
+/* =========================
+   🔐 AUTH MIDDLEWARE
+========================= */
 function auth(req, res, next) {
   const token = req.headers.authorization;
 
@@ -56,164 +56,118 @@ function auth(req, res, next) {
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
+    jwt.verify(token, "segredo");
     next();
   } catch (err) {
     return res.status(401).json({ error: "Token inválido" });
   }
 }
 
-// =======================
-// 🔐 REGISTER
-// =======================
+/* =========================
+   👤 REGISTER
+========================= */
 app.post("/register", async (req, res) => {
   const { nome, email, senha } = req.body;
 
-  try {
-    const hash = await bcrypt.hash(senha, 10);
+  const hash = await bcrypt.hash(senha, 10);
 
-    const user = new User({
-      nome,
-      email,
-      senha: hash
-    });
+  const user = new User({
+    nome,
+    email,
+    senha: hash,
+  });
 
-    await user.save();
+  await user.save();
 
-    res.json({ message: "Usuário criado com sucesso" });
-  } catch (err) {
-    res.status(400).json({ error: "Erro ao registrar usuário" });
-  }
+  res.json({ message: "Usuário criado com sucesso" });
 });
 
-// =======================
-// 🔐 LOGIN
-// =======================
+/* =========================
+   🔑 LOGIN
+========================= */
 app.post("/login", async (req, res) => {
   const { email, senha } = req.body;
 
-  try {
-    const user = await User.findOne({ email });
+  const user = await User.findOne({ email });
 
-    if (!user) {
-      return res.status(400).json({ error: "Usuário não encontrado" });
-    }
-
-    const isMatch = await bcrypt.compare(senha, user.senha);
-
-    if (!isMatch) {
-      return res.status(400).json({ error: "Senha inválida" });
-    }
-
-    const token = jwt.sign(
-      { id: user._id, email: user.email },
-      process.env.JWT_SECRET,
-      { expiresIn: "7d" }
-    );
-
-    res.json({ token });
-  } catch (err) {
-    res.status(500).json({ error: "Erro no login" });
+  if (!user) {
+    return res.status(400).json({ error: "Usuário não encontrado" });
   }
+
+  const valid = await bcrypt.compare(senha, user.senha);
+
+  if (!valid) {
+    return res.status(400).json({ error: "Senha inválida" });
+  }
+
+  const token = jwt.sign({ id: user._id }, "segredo");
+
+  res.json({ token });
 });
 
-// =======================
-// 💾 SAVE TOKEN
-// =======================
+/* =========================
+   💾 SAVE TOKEN (SEM DUPLICAR)
+========================= */
 app.post("/save-token", async (req, res) => {
-  const { token, userId, group } = req.body;
+  const { token } = req.body;
 
-  try {
-    await Token.create({ token, userId, group });
-    res.json({ message: "Token salvo" });
-  } catch (err) {
-    res.status(500).json({ error: "Erro ao salvar token" });
-  }
+  await Token.updateOne(
+    { token },
+    { token },
+    { upsert: true }
+  );
+
+  res.json({ message: "Token salvo" });
 });
 
-// =======================
-// 🚀 SEND GLOBAL (PROTEGIDO)
-// =======================
+/* =========================
+   🚀 SEND PUSH (CORRIGIDO)
+========================= */
 app.post("/send", auth, async (req, res) => {
   const { titulo, mensagem } = req.body;
 
-  try {
-    const tokens = await Token.find();
+  const tokens = await Token.find();
 
-    const response = await admin.messaging().sendEachForMulticast({
-      tokens: tokens.map(t => t.token),
-      notification: {
-        title: titulo,
-        body: mensagem
-      }
-    });
+  const registrationTokens = tokens.map(t => t.token);
+
+  if (registrationTokens.length === 0) {
+    return res.json({ success: false, message: "Nenhum token encontrado" });
+  }
+
+  const message = {
+    data: {
+      title: titulo,
+      body: mensagem,
+    },
+    tokens: registrationTokens,
+  };
+
+  try {
+    const response = await admin.messaging().sendEachForMulticast(message);
 
     res.json({
       success: true,
-      enviados: response.successCount
+      enviados: response.successCount,
     });
-  } catch (err) {
-    res.status(500).json({ error: "Erro no envio" });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Erro ao enviar" });
   }
 });
 
-// =======================
-// 🚀 SEND TO USER (PROTEGIDO)
-// =======================
-app.post("/send-to-user", auth, async (req, res) => {
-  const { userId, titulo, mensagem } = req.body;
-
-  try {
-    const tokens = await Token.find({ userId });
-
-    const response = await admin.messaging().sendEachForMulticast({
-      tokens: tokens.map(t => t.token),
-      notification: {
-        title: titulo,
-        body: mensagem
-      }
-    });
-
-    res.json({
-      success: true,
-      enviados: response.successCount
-    });
-  } catch (err) {
-    res.status(500).json({ error: "Erro no envio por usuário" });
-  }
+/* =========================
+   🌐 ROOT
+========================= */
+app.get("/", (req, res) => {
+  res.send("API PUSH ONLINE 🚀");
 });
 
-// =======================
-// 🚀 SEND TO GROUP (PROTEGIDO)
-// =======================
-app.post("/send-to-group", auth, async (req, res) => {
-  const { group, titulo, mensagem } = req.body;
+/* =========================
+   🚀 START
+========================= */
+const PORT = process.env.PORT || 10000;
 
-  try {
-    const tokens = await Token.find({ group });
-
-    const response = await admin.messaging().sendEachForMulticast({
-      tokens: tokens.map(t => t.token),
-      notification: {
-        title: titulo,
-        body: mensagem
-      }
-    });
-
-    res.json({
-      success: true,
-      enviados: response.successCount
-    });
-  } catch (err) {
-    res.status(500).json({ error: "Erro no envio por grupo" });
-  }
-});
-
-// =======================
-// 🚀 START SERVER
-// =======================
-const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log("Servidor rodando na porta", PORT);
+  console.log("Servidor rodando na porta " + PORT);
 });
