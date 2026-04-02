@@ -1,218 +1,167 @@
-// ================================
-// IMPORTS
-// ================================
-const express = require("express");
-const cors = require("cors");
-const mongoose = require("mongoose");
-const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
-const admin = require("firebase-admin");
 require("dotenv").config();
 
-// ================================
-// APP
-// ================================
+const express = require("express");
+const mongoose = require("mongoose");
+const cors = require("cors");
+const jwt = require("jsonwebtoken");
+const bcrypt = require("bcryptjs");
+const admin = require("firebase-admin");
+
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ================================
-// FIREBASE ADMIN
-// ================================
-const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-
+/* ================= FIREBASE ================= */
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
+  credential: admin.credential.cert({
+    projectId: process.env.FIREBASE_PROJECT_ID,
+    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+  }),
 });
 
-// ================================
-// MONGODB
-// ================================
+/* ================= MONGODB ================= */
 mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ Mongo conectado"))
-  .catch(err => console.error("Erro Mongo:", err));
+  .then(() => console.log("MongoDB conectado"))
+  .catch(err => console.log(err));
 
-// ================================
-// MODELS
-// ================================
-const UserSchema = new mongoose.Schema({
-  nome: String,
-  email: { type: String, unique: true },
-  senha: String
-});
+/* ================= MODELS ================= */
+const User = mongoose.model("User", new mongoose.Schema({
+  email: String,
+  password: String,
+}));
 
-const TokenSchema = new mongoose.Schema({
-  token: String
-});
+const Token = require("./models/Token");
 
-const User = mongoose.model("User", UserSchema);
-const Token = mongoose.model("Token", TokenSchema);
+/* ================= AUTH ================= */
 
-// ================================
-// JWT MIDDLEWARE
-// ================================
-function authMiddleware(req, res, next) {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader) {
-    return res.status(401).json({ error: "Token não enviado" });
-  }
-
-  const token = authHeader.split(" ")[1];
-
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
-    next();
-  } catch (err) {
-    return res.status(401).json({ error: "Token inválido" });
-  }
-}
-
-// ================================
-// REGISTER (CORRIGIDO)
-// ================================
 app.post("/register", async (req, res) => {
-  try {
-    const { nome, email, senha } = req.body;
+  const { email, password } = req.body;
 
-    if (!nome || !email || !senha) {
-      return res.status(400).json({ error: "Preencha todos os campos" });
-    }
+  const hash = await bcrypt.hash(password, 10);
 
-    const existingUser = await User.findOne({ email });
+  const user = new User({ email, password: hash });
+  await user.save();
 
-    if (existingUser) {
-      return res.status(400).json({ error: "Email já cadastrado" });
-    }
-
-    const hash = await bcrypt.hash(senha, 10);
-
-    const user = await User.create({
-      nome,
-      email,
-      senha: hash
-    });
-
-    res.json({
-      success: true,
-      user
-    });
-
-  } catch (err) {
-    console.error("Erro no register:", err);
-    res.status(500).json({ error: "Erro ao registrar" });
-  }
+  res.json({ message: "Usuário criado" });
 });
 
-// ================================
-// LOGIN
-// ================================
 app.post("/login", async (req, res) => {
-  try {
-    const { email, senha } = req.body;
+  const { email, password } = req.body;
 
-    const user = await User.findOne({ email });
+  const user = await User.findOne({ email });
 
-    if (!user) {
-      return res.status(400).json({ error: "Usuário não encontrado" });
-    }
-
-    const match = await bcrypt.compare(senha, user.senha);
-
-    if (!match) {
-      return res.status(400).json({ error: "Senha inválida" });
-    }
-
-    const token = jwt.sign(
-      { id: user._id },
-      process.env.JWT_SECRET,
-      { expiresIn: "7d" }
-    );
-
-    res.json({ token });
-
-  } catch (err) {
-    res.status(500).json({ error: "Erro no login" });
+  if (!user) {
+    return res.status(404).json({ error: "Usuário não encontrado" });
   }
+
+  const valid = await bcrypt.compare(password, user.password);
+
+  if (!valid) {
+    return res.status(401).json({ error: "Senha inválida" });
+  }
+
+  const token = jwt.sign({ email }, process.env.JWT_SECRET, {
+    expiresIn: "7d",
+  });
+
+  res.json({ token });
 });
 
-// ================================
-// SAVE TOKEN (FIREBASE)
-// ================================
+/* ================= SALVAR TOKEN ================= */
+
 app.post("/save-token", async (req, res) => {
   try {
     const { token } = req.body;
 
+    const decoded = jwt.verify(
+      req.headers.authorization.split(" ")[1],
+      process.env.JWT_SECRET
+    );
+
+    const email = decoded.email;
+
     if (!token) {
-      return res.status(400).json({ error: "Token não enviado" });
+      return res.status(400).json({ error: "Token ausente" });
     }
 
-    await Token.updateOne(
+    await Token.findOneAndUpdate(
       { token },
-      { token },
+      { email, token },
       { upsert: true }
     );
 
-    res.json({ success: true });
+    res.json({ message: "Token salvo com sucesso" });
 
   } catch (err) {
-    res.status(500).json({ error: "Erro ao salvar token" });
+    console.error(err);
+    res.status(401).json({ error: "JWT inválido" });
   }
 });
 
-// ================================
-// 🚀 SEND PUSH GLOBAL
-// ================================
-app.post("/send", authMiddleware, async (req, res) => {
+/* ================= ENVIO GLOBAL ================= */
+
+app.post("/send-global", async (req, res) => {
   try {
-    const { titulo, mensagem } = req.body;
+    const { title, body } = req.body;
 
-    if (!titulo || !mensagem) {
-      return res.status(400).json({ error: "Título e mensagem obrigatórios" });
-    }
+    const tokens = await Token.find();
 
-    const tokensDB = await Token.find({});
+    const message = {
+      notification: { title, body },
+      tokens: tokens.map(t => t.token),
+    };
 
-    if (!tokensDB.length) {
-      return res.json({
-        success: true,
-        enviados: 0,
-        message: "Nenhum token cadastrado"
-      });
-    }
-
-    const tokens = tokensDB.map(t => t.token);
-
-    console.log("📦 Tokens encontrados:", tokens.length);
-
-    const response = await admin.messaging().sendEachForMulticast({
-      tokens,
-      notification: {
-        title: titulo,
-        body: mensagem
-      }
-    });
-
-    console.log("📊 Resultado Firebase:", response);
+    const response = await admin.messaging().sendEachForMulticast(message);
 
     res.json({
       success: true,
-      enviados: response.successCount,
-      falhas: response.failureCount
+      sent: response.successCount,
+      failed: response.failureCount,
     });
 
   } catch (err) {
-    console.error("Erro envio:", err);
-    res.status(500).json({ error: "Erro ao enviar push" });
+    console.error(err);
+    res.status(500).json({ error: "Erro no envio global" });
   }
 });
 
-// ================================
-// START SERVER
-// ================================
-const PORT = process.env.PORT || 3000;
+/* ================= ENVIO POR EMAIL (NÍVEL 2) ================= */
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server rodando na porta ${PORT}`);
+app.post("/send-to-user", async (req, res) => {
+  try {
+    const { email, title, body } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: "Email é obrigatório" });
+    }
+
+    const tokens = await Token.find({ email });
+
+    if (!tokens.length) {
+      return res.status(404).json({ error: "Nenhum token encontrado para este usuário" });
+    }
+
+    const message = {
+      notification: { title, body },
+      tokens: tokens.map(t => t.token),
+    };
+
+    const response = await admin.messaging().sendEachForMulticast(message);
+
+    res.json({
+      success: true,
+      sent: response.successCount,
+      failed: response.failureCount,
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Erro ao enviar para usuário" });
+  }
 });
+
+/* ================= START ================= */
+
+const PORT = 3000;
+app.listen(PORT, () => console.log("Servidor rodando na porta " + PORT));
