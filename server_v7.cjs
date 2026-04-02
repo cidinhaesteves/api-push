@@ -37,7 +37,7 @@ mongoose.connect(process.env.MONGO_URI)
 // ================================
 const UserSchema = new mongoose.Schema({
   nome: String,
-  email: String,
+  email: { type: String, unique: true },
   senha: String
 });
 
@@ -70,11 +70,21 @@ function authMiddleware(req, res, next) {
 }
 
 // ================================
-// REGISTER
+// REGISTER (CORRIGIDO)
 // ================================
 app.post("/register", async (req, res) => {
   try {
     const { nome, email, senha } = req.body;
+
+    if (!nome || !email || !senha) {
+      return res.status(400).json({ error: "Preencha todos os campos" });
+    }
+
+    const existingUser = await User.findOne({ email });
+
+    if (existingUser) {
+      return res.status(400).json({ error: "Email já cadastrado" });
+    }
 
     const hash = await bcrypt.hash(senha, 10);
 
@@ -84,8 +94,13 @@ app.post("/register", async (req, res) => {
       senha: hash
     });
 
-    res.json(user);
+    res.json({
+      success: true,
+      user
+    });
+
   } catch (err) {
+    console.error("Erro no register:", err);
     res.status(500).json({ error: "Erro ao registrar" });
   }
 });
@@ -116,13 +131,14 @@ app.post("/login", async (req, res) => {
     );
 
     res.json({ token });
+
   } catch (err) {
     res.status(500).json({ error: "Erro no login" });
   }
 });
 
 // ================================
-// SAVE TOKEN
+// SAVE TOKEN (FIREBASE)
 // ================================
 app.post("/save-token", async (req, res) => {
   try {
@@ -139,13 +155,14 @@ app.post("/save-token", async (req, res) => {
     );
 
     res.json({ success: true });
+
   } catch (err) {
     res.status(500).json({ error: "Erro ao salvar token" });
   }
 });
 
 // ================================
-// 🚀 SEND PUSH GLOBAL (CORRIGIDO)
+// 🚀 SEND PUSH GLOBAL
 // ================================
 app.post("/send", authMiddleware, async (req, res) => {
   try {
@@ -155,7 +172,6 @@ app.post("/send", authMiddleware, async (req, res) => {
       return res.status(400).json({ error: "Título e mensagem obrigatórios" });
     }
 
-    // 🔥 BUSCAR TOKENS DO BANCO
     const tokensDB = await Token.find({});
 
     if (!tokensDB.length) {
@@ -170,7 +186,6 @@ app.post("/send", authMiddleware, async (req, res) => {
 
     console.log("📦 Tokens encontrados:", tokens.length);
 
-    // 🔥 ENVIO FIREBASE
     const response = await admin.messaging().sendEachForMulticast({
       tokens,
       notification: {
