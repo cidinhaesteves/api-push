@@ -1,182 +1,203 @@
+// ================================
+// IMPORTS
+// ================================
 const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
-const admin = require("firebase-admin");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const admin = require("firebase-admin");
+require("dotenv").config();
 
+// ================================
+// APP
+// ================================
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-/* =========================
-   🔥 FIREBASE ADMIN
-========================= */
+// ================================
+// FIREBASE ADMIN
+// ================================
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
 
-/* =========================
-   💾 MONGODB
-========================= */
+// ================================
+// MONGODB
+// ================================
 mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("MongoDB conectado"))
-  .catch(err => console.log(err));
+  .then(() => console.log("✅ Mongo conectado"))
+  .catch(err => console.error("Erro Mongo:", err));
 
-/* =========================
-   📦 MODELS
-========================= */
-
-// USERS
+// ================================
+// MODELS
+// ================================
 const UserSchema = new mongoose.Schema({
   nome: String,
   email: String,
-  senha: String,
+  senha: String
+});
+
+const TokenSchema = new mongoose.Schema({
+  token: String
 });
 
 const User = mongoose.model("User", UserSchema);
-
-// TOKENS
-const TokenSchema = new mongoose.Schema({
-  token: String,
-});
-
 const Token = mongoose.model("Token", TokenSchema);
 
-/* =========================
-   🔐 AUTH MIDDLEWARE (CORRIGIDO)
-========================= */
-function auth(req, res, next) {
+// ================================
+// JWT MIDDLEWARE
+// ================================
+function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
 
   if (!authHeader) {
     return res.status(401).json({ error: "Token não enviado" });
   }
 
-  let token;
-
-  // ✅ Aceita com ou sem Bearer (robusto)
-  if (authHeader.startsWith("Bearer ")) {
-    token = authHeader.split(" ")[1];
-  } else {
-    token = authHeader;
-  }
+  const token = authHeader.split(" ")[1];
 
   try {
-    jwt.verify(token, "segredo");
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = decoded;
     next();
   } catch (err) {
     return res.status(401).json({ error: "Token inválido" });
   }
 }
 
-/* =========================
-   👤 REGISTER
-========================= */
+// ================================
+// REGISTER
+// ================================
 app.post("/register", async (req, res) => {
-  const { nome, email, senha } = req.body;
-
-  const hash = await bcrypt.hash(senha, 10);
-
-  const user = new User({
-    nome,
-    email,
-    senha: hash,
-  });
-
-  await user.save();
-
-  res.json({ message: "Usuário criado com sucesso" });
-});
-
-/* =========================
-   🔑 LOGIN
-========================= */
-app.post("/login", async (req, res) => {
-  const { email, senha } = req.body;
-
-  const user = await User.findOne({ email });
-
-  if (!user) {
-    return res.status(400).json({ error: "Usuário não encontrado" });
-  }
-
-  const valid = await bcrypt.compare(senha, user.senha);
-
-  if (!valid) {
-    return res.status(400).json({ error: "Senha inválida" });
-  }
-
-  const token = jwt.sign({ id: user._id }, "segredo");
-
-  res.json({ token });
-});
-
-/* =========================
-   💾 SAVE TOKEN (SEM DUPLICAR)
-========================= */
-app.post("/save-token", async (req, res) => {
-  const { token } = req.body;
-
-  await Token.updateOne(
-    { token },
-    { token },
-    { upsert: true }
-  );
-
-  res.json({ message: "Token salvo" });
-});
-
-/* =========================
-   🚀 SEND PUSH (CORRIGIDO)
-========================= */
-app.post("/send", auth, async (req, res) => {
-  const { titulo, mensagem } = req.body;
-
-  const tokens = await Token.find();
-
-  const registrationTokens = tokens.map(t => t.token);
-
-  if (registrationTokens.length === 0) {
-    return res.json({ success: false, message: "Nenhum token encontrado" });
-  }
-
-  const message = {
-    data: {
-      title: titulo,
-      body: mensagem,
-    },
-    tokens: registrationTokens,
-  };
-
   try {
-    const response = await admin.messaging().sendEachForMulticast(message);
+    const { nome, email, senha } = req.body;
+
+    const hash = await bcrypt.hash(senha, 10);
+
+    const user = await User.create({
+      nome,
+      email,
+      senha: hash
+    });
+
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao registrar" });
+  }
+});
+
+// ================================
+// LOGIN
+// ================================
+app.post("/login", async (req, res) => {
+  try {
+    const { email, senha } = req.body;
+
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(400).json({ error: "Usuário não encontrado" });
+    }
+
+    const match = await bcrypt.compare(senha, user.senha);
+
+    if (!match) {
+      return res.status(400).json({ error: "Senha inválida" });
+    }
+
+    const token = jwt.sign(
+      { id: user._id },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    res.json({ token });
+  } catch (err) {
+    res.status(500).json({ error: "Erro no login" });
+  }
+});
+
+// ================================
+// SAVE TOKEN
+// ================================
+app.post("/save-token", async (req, res) => {
+  try {
+    const { token } = req.body;
+
+    if (!token) {
+      return res.status(400).json({ error: "Token não enviado" });
+    }
+
+    await Token.updateOne(
+      { token },
+      { token },
+      { upsert: true }
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao salvar token" });
+  }
+});
+
+// ================================
+// 🚀 SEND PUSH GLOBAL (CORRIGIDO)
+// ================================
+app.post("/send", authMiddleware, async (req, res) => {
+  try {
+    const { titulo, mensagem } = req.body;
+
+    if (!titulo || !mensagem) {
+      return res.status(400).json({ error: "Título e mensagem obrigatórios" });
+    }
+
+    // 🔥 BUSCAR TOKENS DO BANCO
+    const tokensDB = await Token.find({});
+
+    if (!tokensDB.length) {
+      return res.json({
+        success: true,
+        enviados: 0,
+        message: "Nenhum token cadastrado"
+      });
+    }
+
+    const tokens = tokensDB.map(t => t.token);
+
+    console.log("📦 Tokens encontrados:", tokens.length);
+
+    // 🔥 ENVIO FIREBASE
+    const response = await admin.messaging().sendEachForMulticast({
+      tokens,
+      notification: {
+        title: titulo,
+        body: mensagem
+      }
+    });
+
+    console.log("📊 Resultado Firebase:", response);
 
     res.json({
       success: true,
       enviados: response.successCount,
+      falhas: response.failureCount
     });
 
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Erro ao enviar" });
+  } catch (err) {
+    console.error("Erro envio:", err);
+    res.status(500).json({ error: "Erro ao enviar push" });
   }
 });
 
-/* =========================
-   🌐 ROOT
-========================= */
-app.get("/", (req, res) => {
-  res.send("API PUSH ONLINE 🚀");
-});
-
-/* =========================
-   🚀 START
-========================= */
-const PORT = process.env.PORT || 10000;
+// ================================
+// START SERVER
+// ================================
+const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("Servidor rodando na porta " + PORT);
+  console.log(`🚀 Server rodando na porta ${PORT}`);
 });
