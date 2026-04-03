@@ -12,20 +12,22 @@ app.use(cors());
 app.use(express.json());
 
 /* ================= FIREBASE ================= */
+
+// 👉 USA JSON COMPLETO DO RENDER
+const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+
 admin.initializeApp({
-  credential: admin.credential.cert({
-    projectId: process.env.FIREBASE_PROJECT_ID,
-    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
-  }),
+  credential: admin.credential.cert(serviceAccount),
 });
 
 /* ================= MONGODB ================= */
+
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log("MongoDB conectado"))
   .catch(err => console.log(err));
 
 /* ================= MODELS ================= */
+
 const User = mongoose.model("User", new mongoose.Schema({
   email: String,
   password: String,
@@ -126,20 +128,16 @@ app.post("/send-global", async (req, res) => {
   }
 });
 
-/* ================= ENVIO POR EMAIL (NÍVEL 2) ================= */
+/* ================= ENVIO POR EMAIL ================= */
 
 app.post("/send-to-user", async (req, res) => {
   try {
     const { email, title, body } = req.body;
 
-    if (!email) {
-      return res.status(400).json({ error: "Email é obrigatório" });
-    }
-
     const tokens = await Token.find({ email });
 
     if (!tokens.length) {
-      return res.status(404).json({ error: "Nenhum token encontrado para este usuário" });
+      return res.status(404).json({ error: "Nenhum token encontrado" });
     }
 
     const message = {
@@ -157,11 +155,11 @@ app.post("/send-to-user", async (req, res) => {
 
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Erro ao enviar para usuário" });
+    res.status(500).json({ error: "Erro ao enviar" });
   }
 });
 
 /* ================= START ================= */
 
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log("Servidor rodando na porta " + PORT));
