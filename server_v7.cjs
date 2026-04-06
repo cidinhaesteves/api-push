@@ -4,9 +4,20 @@ const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 
+const admin = require("firebase-admin");
+
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// ================================
+// FIREBASE ADMIN
+// ================================
+const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
 
 // ================================
 // MONGODB
@@ -24,27 +35,27 @@ const User = mongoose.model("User", {
 });
 
 // ================================
-// LOGIN (CORRIGIDO)
+// MODEL TOKEN
+// ================================
+const Token = mongoose.model("Token", {
+  token: String
+});
+
+// ================================
+// LOGIN
 // ================================
 app.post("/login", async (req, res) => {
   try {
     const { email, senha } = req.body;
 
-    // 🔒 validação básica
     if (!email || !senha) {
       return res.status(400).json({ error: "Email e senha obrigatórios" });
     }
 
     const user = await User.findOne({ email });
 
-    // 🔒 VERIFICA SE USUÁRIO EXISTE
     if (!user) {
       return res.status(404).json({ error: "Usuário não encontrado" });
-    }
-
-    // 🔒 VERIFICA SE SENHA EXISTE
-    if (!user.senha) {
-      return res.status(500).json({ error: "Senha inválida no banco" });
     }
 
     const senhaValida = await bcrypt.compare(senha, user.senha);
@@ -63,7 +74,73 @@ app.post("/login", async (req, res) => {
 
   } catch (err) {
     console.error("Erro no login:", err);
-    res.status(500).json({ error: "Erro interno no servidor" });
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
+// ================================
+// MIDDLEWARE AUTH
+// ================================
+function auth(req, res, next) {
+  const header = req.headers.authorization;
+
+  if (!header) return res.status(401).json({ error: "Sem token" });
+
+  const token = header.split(" ")[1];
+
+  try {
+    jwt.verify(token, process.env.JWT_SECRET);
+    next();
+  } catch {
+    return res.status(401).json({ error: "Token inválido" });
+  }
+}
+
+// ================================
+// SAVE TOKEN (PWA)
+// ================================
+app.post("/save-token", auth, async (req, res) => {
+  try {
+    const { token } = req.body;
+
+    await Token.create({ token });
+
+    res.json({ success: true });
+
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao salvar token" });
+  }
+});
+
+// ================================
+// 🚀 SEND GLOBAL (AGORA EXISTE)
+// ================================
+app.post("/send-global", auth, async (req, res) => {
+  try {
+    const { title, body } = req.body;
+
+    const tokens = await Token.find();
+
+    const messages = tokens.map(t => ({
+      notification: {
+        title,
+        body
+      },
+      token: t.token
+    }));
+
+    const results = await Promise.allSettled(
+      messages.map(msg => admin.messaging().send(msg))
+    );
+
+    res.json({
+      success: true,
+      enviados: results.length
+    });
+
+  } catch (err) {
+    console.error("Erro send-global:", err);
+    res.status(500).json({ error: "Erro ao enviar push" });
   }
 });
 
