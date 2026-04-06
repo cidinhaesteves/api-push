@@ -3,7 +3,6 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-
 const admin = require("firebase-admin");
 
 const app = express();
@@ -11,7 +10,7 @@ app.use(cors());
 app.use(express.json());
 
 // ================================
-// FIREBASE ADMIN
+// FIREBASE
 // ================================
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 
@@ -20,23 +19,20 @@ admin.initializeApp({
 });
 
 // ================================
-// MONGODB
+// MONGO
 // ================================
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log("MongoDB conectado"))
   .catch(err => console.log("Erro Mongo:", err));
 
 // ================================
-// MODEL USER
+// MODELS
 // ================================
 const User = mongoose.model("User", {
   email: String,
   senha: String
 });
 
-// ================================
-// MODEL TOKEN
-// ================================
 const Token = mongoose.model("Token", {
   token: String
 });
@@ -73,13 +69,13 @@ app.post("/login", async (req, res) => {
     res.json({ token });
 
   } catch (err) {
-    console.error("Erro no login:", err);
+    console.error("Erro login:", err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
 
 // ================================
-// MIDDLEWARE AUTH
+// AUTH
 // ================================
 function auth(req, res, next) {
   const header = req.headers.authorization;
@@ -97,7 +93,7 @@ function auth(req, res, next) {
 }
 
 // ================================
-// SAVE TOKEN (PWA)
+// SAVE TOKEN
 // ================================
 app.post("/save-token", auth, async (req, res) => {
   try {
@@ -113,7 +109,7 @@ app.post("/save-token", auth, async (req, res) => {
 });
 
 // ================================
-// 🚀 SEND GLOBAL (AGORA EXISTE)
+// SEND GLOBAL
 // ================================
 app.post("/send-global", auth, async (req, res) => {
   try {
@@ -122,10 +118,7 @@ app.post("/send-global", auth, async (req, res) => {
     const tokens = await Token.find();
 
     const messages = tokens.map(t => ({
-      notification: {
-        title,
-        body
-      },
+      notification: { title, body },
       token: t.token
     }));
 
