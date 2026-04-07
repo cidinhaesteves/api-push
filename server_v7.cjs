@@ -101,15 +101,18 @@ app.post("/save-token", auth, async (req, res) => {
 
     await Token.create({ token });
 
+    console.log("📱 Token salvo:", token);
+
     res.json({ success: true });
 
   } catch (err) {
+    console.error("Erro salvar token:", err);
     res.status(500).json({ error: "Erro ao salvar token" });
   }
 });
 
 // ================================
-// SEND GLOBAL
+// SEND GLOBAL (CORRIGIDO)
 // ================================
 app.post("/send-global", auth, async (req, res) => {
   try {
@@ -118,13 +121,25 @@ app.post("/send-global", auth, async (req, res) => {
     const tokens = await Token.find();
 
     const messages = tokens.map(t => ({
-      notification: { title, body },
-      token: t.token
+      token: t.token,
+      notification: {
+        title,
+        body
+      },
+      webpush: {
+        notification: {
+          title,
+          body,
+          icon: "/icon.png"
+        }
+      }
     }));
 
     const results = await Promise.allSettled(
       messages.map(msg => admin.messaging().send(msg))
     );
+
+    console.log("📨 Enviados:", results.length);
 
     res.json({
       success: true,
